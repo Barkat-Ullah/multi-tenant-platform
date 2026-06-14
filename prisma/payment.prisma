@@ -1,0 +1,31 @@
+model Payment {
+    id                String        @id @default(auto()) @map("_id") @db.ObjectId
+    userId            String        @db.ObjectId
+    bookingId         String?       @unique @db.ObjectId
+    amount            Float
+    currency          Currency      @default(usd)
+    status            PaymentStatus @default(PENDING)
+    paymentMethodType String?
+    cardBrand         String?
+    cardLast4         String?
+    cardExpMonth      Int?
+    cardExpYear       Int?
+    stripeSessionId   String?       @unique
+    stripePaymentId   String?       @unique
+    stripeCustomerId  String?
+    paypalOrderId     String?       @unique
+    createdAt         DateTime      @default(now())
+    updatedAt         DateTime      @updatedAt
+    //relation
+    user              User          @relation(fields: [userId], references: [id])
+    booking           Booking?      @relation(fields: [bookingId], references: [id])
+
+    @@map("payments")
+}
+
+enum PaymentStatus {
+    PENDING
+    SUCCESS
+    FAILED
+    CANCELED
+}

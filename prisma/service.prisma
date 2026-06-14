@@ -1,0 +1,17 @@
+model Service {
+    id                String             @id @default(auto()) @map("_id") @db.ObjectId
+    userId            String             @db.ObjectId
+    title             String
+    description       String?
+    files             String?
+    isDeleted         Boolean            @default(false)
+    createdAt         DateTime           @default(now())
+    updatedAt         DateTime           @updatedAt
+    // relation
+    admin             User               @relation("ServiceUser", fields: [userId], references: [id])
+    clinicServices    ClinicService[]    @relation("ServiceToClinics")
+    bookings          Booking[]
+    organizerRequests OrganizerRequest[]
+
+    @@map("services")
+}

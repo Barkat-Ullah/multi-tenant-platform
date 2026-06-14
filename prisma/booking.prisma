@@ -1,0 +1,77 @@
+model ClinicAvailability {
+    id        String     @id @default(auto()) @map("_id") @db.ObjectId
+    clinicId  String     @db.ObjectId
+    slotDate  DateTime
+    isActive  Boolean    @default(true)
+    createdAt DateTime   @default(now())
+    updatedAt DateTime   @updatedAt
+    //relation
+    clinic    User       @relation("ClinicAvailabilityUser", fields: [clinicId], references: [id])
+    timeSlots TimeSlot[]
+
+    @@unique([clinicId, slotDate])
+    @@index([clinicId])
+    @@index([slotDate])
+    @@map("clinic_available")
+}
+
+model TimeSlot {
+    id              String             @id @default(auto()) @map("_id") @db.ObjectId
+    availabilityId  String             @db.ObjectId
+    clinicId        String             @db.ObjectId
+    date            DateTime
+    duration        Int                @default(30)
+    startTime       String // "09:00 "
+    endTime         String // "17:30 "
+    capacity        Int                @default(1)
+    booked          Int                @default(0)
+    isBooked        Boolean            @default(true)
+    status          SlotStatus
+    createdAt       DateTime           @default(now())
+    updatedAt       DateTime           @updatedAt
+    //relation
+    clinicAvailable ClinicAvailability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+    clinic          User               @relation("ClinicTimeSlots", fields: [clinicId], references: [id])
+    bookings        Booking[]
+
+    @@unique([clinicId, date, startTime])
+    @@index([clinicId, date])
+    @@map("time_slots")
+}
+
+enum SlotStatus {
+    Active
+    Inactive
+}
+
+model Booking {
+    id            String         @id @default(auto()) @map("_id") @db.ObjectId
+    paymethodId   String?        @db.ObjectId // stripe or paypal
+    serviceId     String?        @db.ObjectId
+    driverId      String         @db.ObjectId
+    clinicId      String         @db.ObjectId
+    timeSlotId    String?        @db.ObjectId
+    scheduledAt   DateTime
+    status        BookingStatus  @default(PENDING)
+    createdAt     DateTime       @default(now())
+    updatedAt     DateTime       @updatedAt
+    //relation
+    driver        User           @relation("DriverBookings", fields: [driverId], references: [id])
+    clinic        User           @relation("ClinicBookings", fields: [clinicId], references: [id])
+    timeSlot      TimeSlot?      @relation(fields: [timeSlotId], references: [id])
+    payment       Payment?
+    method        PayMethod?     @relation(fields: [paymethodId], references: [id])
+    service       Service?       @relation(fields: [serviceId], references: [id])
+    medicalRecord MedicalRecord?
+
+    @@index([driverId])
+    @@index([clinicId])
+    @@map("bookings")
+}
+
+enum BookingStatus {
+    PENDING
+    CONFIRMED
+    COMPLETED
+    CANCELLED
+}

@@ -1,0 +1,144 @@
+model User {
+  id                     String                   @id @default(auto()) @map("_id") @db.ObjectId
+  //shared field
+  fullName               String
+  email                  String                   @unique
+  phoneNumber            String?
+  image                  String?
+  password               String
+  //
+  role                   UserRoleEnum             @default(USER)
+  status                 UserStatus               @default(ACTIVE)
+  //
+  describe               String?
+  city                   String?
+  address                String?
+  isAgreeWithTerms       Boolean                  @default(false)
+  otp                    String?
+  otpExpiry              DateTime?
+  isEmailVerified        Boolean                  @default(false)
+  isSocialLogin          Boolean                  @default(false)
+  isDeleted              Boolean                  @default(false)
+  stripeCustomerId       String?
+  lastLoginAt            DateTime?
+  fcmToken               String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  // ── Driver fields ──────────────────────────
+  licenseNo              String?
+  dateOfBirth            DateTime?
+  medicalStatus          MedicalStatusEnum?       @default(PENDING)
+  medicalExpiry          DateTime?
+  // ── Organizer fields ───────────────────────
+  companyLocation        String?
+  organizerId            String?                  @db.ObjectId
+  organizer              User?                    @relation("OrganizerDrivers", fields: [organizerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  drivers                User[]                   @relation("OrganizerDrivers")
+  // ── Clinic fields ──────────────────────────
+  offDays                String[]                 @default([]) // ["sat","sun"]
+  isParking              Boolean                  @default(false)
+  locationId             String?                  @db.ObjectId
+  // serviceId          String[]           @db.ObjectId
+  // service            Service?           @relation(fields: [serviceId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  clinicServices         ClinicService[]          @relation("ClinicToServices")
+  location               Location?                @relation(fields: [locationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  clinicGmcNumber        String?
+  // ── Existing relations (keep as-is) ────────
+  //self relation
+  createdById            String?                  @db.ObjectId //admin who created user
+  createdBy              User?                    @relation("UserCreation", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  //
+  createdUsers           User[]                   @relation("UserCreation")
+  payments               Payment[]
+  receiver               Notification[]           @relation("Receiver")
+  sender                 Notification[]           @relation("Sender")
+  roomSender             Room[]                   @relation("RoomSender")
+  roomReceiver           Room[]                   @relation("RoomReceiver")
+  sentChats              Chat[]                   @relation("ChatSender")
+  receivedChats          Chat[]                   @relation("ChatReceiver")
+  socialAccount          SocialAccount[]
+  // in User model
+  bookings               Booking[]                @relation("DriverBookings")
+  clinicBookings         Booking[]                @relation("ClinicBookings")
+  medicalRecords         MedicalRecord[]          @relation("DriverMedicalRecords")
+  // in User model — add these lines
+  timeSlots              TimeSlot[]               @relation("ClinicTimeSlots")
+  auditLogs              AuditLog[]               @relation("AuditActor")
+  adminCreate            Location[]               @relation("LocationCreateAdmin")
+  adminCreateService     Service[]                @relation("ServiceUser")
+  clinicAvailabilities   ClinicAvailability[]     @relation("ClinicAvailabilityUser")
+  clinic                 MedicalRecord[]
+  organizerRequests      OrganizerRequest[]       @relation("OrganizerRequestServices")
+  cliniOrganizerRequests OrganizerRequest[]       @relation("clinicsView")
+  requestedDrivers       OrganizerRequestDriver[] @relation("RequestedDrivers")
+
+  @@map("users")
+}
+
+//user can pay stripe or paypal
+model PayMethod {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  type      PayType   @unique
+  isActive  Boolean   @default(true) // admin can change the active or not
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  booking   Booking[]
+
+  @@map("pay_method")
+}
+
+enum PayType {
+  Stripe
+  Paypal
+}
+
+model ClinicService {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  clinicId  String   @db.ObjectId
+  serviceId String   @db.ObjectId
+  createdAt DateTime @default(now())
+  //relation
+  clinic    User     @relation("ClinicToServices", fields: [clinicId], references: [id], onDelete: Cascade)
+  service   Service  @relation("ServiceToClinics", fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([clinicId, serviceId])
+  @@map("clinic_services")
+}
+
+enum MedicalStatusEnum {
+  PENDING
+  VALID
+  EXPIRED
+  FAILED
+}
+
+model SocialAccount {
+  id         String             @id @default(auto()) @map("_id") @db.ObjectId
+  provider   SocialProviderEnum
+  providerId String
+  userId     String             @db.ObjectId
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime           @default(now())
+
+  @@unique([provider, providerId])
+  @@index([userId])
+  @@map("social_accounts")
+}
+
+enum SocialProviderEnum {
+  GOOGLE
+  FACEBOOK
+}
+
+enum UserRoleEnum {
+  USER
+  ORGINIZER
+  CLINIC
+  ADMIN
+  SUPERADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}

@@ -1,0 +1,34 @@
+model Notification {
+    id          String      @id @default(auto()) @map("_id") @db.ObjectId
+    receiverId  String      @db.ObjectId
+    senderId    String?     @db.ObjectId
+    title       String
+    body        String
+    isRead      Boolean     @default(false)
+    referenceId String?
+    type        NotifyType?
+    createdAt   DateTime    @default(now())
+    updatedAt   DateTime    @updatedAt
+    //relation
+    receiver    User        @relation("Receiver", fields: [receiverId], references: [id])
+    sender      User?       @relation("Sender", fields: [senderId], references: [id])
+
+    @@map("notifications")
+}
+
+enum NotifyType {
+  Registration
+  Contact
+  Report
+  Message
+  Payment
+  MedicalRecord
+
+  // was Appointment*
+  BookingCreated
+  BookingConfirmed
+  BookingCancelled
+  ResultUploaded
+  MedicalExpiringSoon
+  MedicalExpired
+}

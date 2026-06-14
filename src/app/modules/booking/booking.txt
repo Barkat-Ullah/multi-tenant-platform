@@ -1,0 +1,49 @@
+
+
+// PATCH /booking/reschedule/:id — driver reschedules
+{
+  "newTimeSlotId": "6a2386a96e3a9b8252b1224d",
+  "newScheduledAt": "2026-06-16T10:00:00Z"
+}
+
+// PATCH /booking/cancel/:id — any party cancels
+{
+  "reason": "Driver is unavailable on this date"
+}
+
+// GET /booking?clinicId=X&status=PENDING&createdAt=2026-06 — admin filter
+
+1. POST /booking → returns { paymentUrl }
+2. Frontend redirects user to paymentUrl (Stripe checkout or PayPal approve page)
+3. User completes payment → redirected back to:
+   - Stripe: /payment/success?bookingId=X&session_id=Y
+   - PayPal: /payment/success?bookingId=X&token=Y (token = orderId)
+4. Frontend calls:
+   - GET /payment/verify-stripe?sessionId=Y
+   - POST /payment/verify-paypal { orderId: Y }
+5. Backend confirms booking status → CONFIRMED
+
+// GET /payment/verify-stripe?sessionId=cs_test_a1b2c3...
+
+// POST /payment/verify-paypal
+{
+  "orderId": "8XY12345AB678901C"
+}
+
+// POST /booking — Stripe
+{
+  "clinicId": "6a21390ff04350b3b27d8281",
+  "timeSlotId": "6a2386a96e3a9b8252b1224c",
+  "scheduledAt": "2026-06-15T09:00:00Z",
+  "paymentType": "Stripe",
+  "price": 49.99
+}
+
+// POST /booking — PayPal
+{
+  "clinicId": "6a21390ff04350b3b27d8281",
+  "timeSlotId": "6a2386a96e3a9b8252b1224c",
+  "scheduledAt": "2026-06-15T09:00:00Z",
+  "paymentType": "Paypal",
+  "price": 49.99
+}

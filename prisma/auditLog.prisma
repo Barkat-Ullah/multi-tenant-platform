@@ -1,0 +1,41 @@
+model AuditLog {
+    id          String      @id @default(auto()) @map("_id") @db.ObjectId
+    actorId     String      @db.ObjectId
+    action      AuditAction
+    targetModel String
+    targetId    String?
+    metadata    Json?
+    ipAddress   String?
+    userAgent   String?
+    createdAt   DateTime    @default(now())
+    //relation
+    actor       User        @relation("AuditActor", fields: [actorId], references: [id], onDelete: NoAction)
+
+    @@index([actorId])
+    @@index([targetModel, targetId])
+    @@index([createdAt])
+    @@map("audit_logs")
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  REGISTER
+  USER_CREATED
+  PASSWORD_RESET
+
+  // was APPOINTMENT_*
+  BOOKING_CREATED
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_COMPLETED
+  BOOKING_RESCHEDULED
+
+  RESULT_UPLOADED
+  RESULT_UPDATED
+  MEDICAL_STATUS_CHANGED
+  USER_SUSPENDED
+  USER_DELETED
+  USER_UPDATED
+  PAYMENT_REFUNDED
+}

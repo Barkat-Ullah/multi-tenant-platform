@@ -1,0 +1,17 @@
+model Location {
+    id                String   @id @default(auto()) @map("_id") @db.ObjectId
+    adminId           String   @db.ObjectId
+    locationName      String
+    lat               Float    @default(0.0)
+    lng               Float    @default(0.0)
+    totalBookings     Int      @default(0)
+    totalClinicsAdded Int      @default(0)
+    isDeleted         Boolean  @default(false)
+    createdAt         DateTime @default(now())
+    updatedAt         DateTime @updatedAt
+    // relation
+    admin             User     @relation("LocationCreateAdmin", fields: [adminId], references: [id])
+    clinic             User[]
+
+    @@map("locations")
+}

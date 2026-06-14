@@ -1,0 +1,212 @@
+POST /api/v1/medical-records
+Authorization: Bearer <clinic_token>
+Content-Type: multipart/form-data
+
+bookingId        : 6a2cccea7c920d65fed14ecf
+result           : Submitted
+notes            : Driver is medically fit for HGV
+expiryDate       : 2027-06-14
+files            : [attach PDF file]
+
+POST /api/v1/medical-records
+Authorization: Bearer <clinic_token>
+Content-Type: multipart/form-data
+
+organizerRequestId : 6aREQUESTID000000000000
+driverId           : 6aDRIVER1ID000000000000
+result             : Submitted
+notes              : Fit to drive HGV
+expiryDate         : 2027-06-14
+files              : [attach PDF file]
+
+# 1. Driver registers
+POST /api/v1/auth/register
+{
+  "fullName": "John Driver",
+  "email": "john@driver.com",
+  "password": "123456",
+  "role": "USER"
+}
+
+# 2. Driver views all services
+GET /api/v1/services
+Authorization: Bearer <driver_token>
+
+# 3. Driver clicks a service → sees clinics offering it
+GET /api/v1/services/6a238171a710b2623fd3d07f
+Authorization: Bearer <driver_token>
+
+# 4. Driver selects a clinic → views available slots
+GET /api/v1/timeslots/slots?clinicId=6a238a4f01a92aa7c1c70cd4&date=2026-06-14&serviceId=6a238171a710b2623fd3d07f
+Authorization: Bearer <driver_token>
+
+# 5. Driver creates booking (Stripe)
+POST /api/v1/bookings
+Authorization: Bearer <driver_token>
+{
+  "clinicId": "6a238a4f01a92aa7c1c70cd4",
+  "serviceId": "6a238171a710b2623fd3d07f",
+  "timeSlotId": "6a2cccea7c920d65fed14ecf",
+  "scheduledAt": "2026-06-14T09:00:00.000Z",
+  "paymentType": "Stripe",
+  "price": 50
+}
+# Response includes paymentUrl → driver pays via Stripe
+
+# 6. After Stripe redirect → verify payment
+GET /api/v1/bookings/verify-stripe?sessionId=cs_test_xxxx
+Authorization: Bearer <driver_token>
+# ✅ Booking confirmed, driver gets email + notification
+
+# 7. Driver views their bookings
+GET /api/v1/bookings/my
+Authorization: Bearer <driver_token>
+
+# 8. Clinic uploads medical record after appointment
+POST /api/v1/medical-records
+Authorization: Bearer <clinic_token>
+Content-Type: multipart/form-data
+{
+  "bookingId": "6a2cccea7c920d65fed14eaa",
+  "driverId": "6a238171a710b2623fd3d0aa",
+  "result": "Submitted",
+  "notes": "Driver is medically fit",
+  "expiryDate": "2027-06-14"
+  // + files field (PDF upload)
+}
+# ✅ Driver gets email + notification
+
+# 9. Driver views their medical records
+GET /api/v1/medical-records/my
+Authorization: Bearer <driver_token>
+
+# 10. Driver views single record
+GET /api/v1/medical-records/6a2cccea7c920d65fed14ebb
+Authorization: Bearer <driver_token>
+
+.....................................................
+
+# 1. Organizer registers
+POST /api/v1/auth/register
+{
+  "fullName": "Mike Organizer",
+  "email": "mike@org.com",
+  "password": "123456",
+  "role": "ORGINIZER"
+}
+
+# 2. Organizer creates drivers under their company
+POST /api/v1/auth/register
+{
+  "fullName": "Driver One",
+  "email": "driver1@org.com",
+  "password": "123456",
+  "role": "USER",
+  "organizerId": "6a238aaa01a92aa7c1c70cd4"   ← organizer's id
+}
+
+POST /api/v1/auth/register
+{
+  "fullName": "Driver Two",
+  "email": "driver2@org.com",
+  "password": "123456",
+  "role": "USER",
+  "organizerId": "6a238aaa01a92aa7c1c70cd4"
+}
+
+# 3. Organizer views services
+GET /api/v1/services
+Authorization: Bearer <organizer_token>
+
+# 4. Organizer submits a request for a service
+POST /api/v1/organizer-requests
+Authorization: Bearer <organizer_token>
+{
+  "serviceId": "6a238171a710b2623fd3d07f",
+  "companyName": "Mike Transport Ltd",
+  "email": "mike@org.com",
+  "phone": "01711111111",
+  "location": "Dhaka",
+  "totalDriver": "2"
+}
+# Response: { id: "6aREQUESTID...", status: "Pending" }
+
+# 5. Admin views all pending requests
+GET /api/v1/organizer-requests
+Authorization: Bearer <admin_token>
+
+# 6. Admin assigns a clinic + confirms the request
+PATCH /api/v1/organizer-requests/6aREQUESTID
+Authorization: Bearer <admin_token>
+{
+  "clinicId": "6a238a4f01a92aa7c1c70cd4",
+  "status": "Confirmed"
+}
+# ✅ Organizer gets notified that request is confirmed
+
+# 7. Organizer adds their drivers to the confirmed request
+POST /api/v1/organizer-requests/6aREQUESTID/drivers
+Authorization: Bearer <organizer_token>
+{
+  "driverIds": [
+    "6aDRIVER1ID000000000000",
+    "6aDRIVER2ID000000000000"
+  ]
+}
+
+# 8. Clinic views their assigned requests + driver list
+GET /api/v1/organizer-requests/my
+Authorization: Bearer <clinic_token>
+# Response shows the request with drivers array
+
+# 9. Clinic uploads medical record for Driver One
+POST /api/v1/medical-records
+Authorization: Bearer <clinic_token>
+Content-Type: multipart/form-data
+{
+  "organizerRequestId": "6aREQUESTID",
+  "driverId": "6aDRIVER1ID000000000000",
+  "result": "Submitted",
+  "notes": "Fit to drive HGV",
+  "expiryDate": "2027-06-14"
+  // + files field (PDF report)
+}
+# ✅ Driver One gets email + notification
+# ✅ Organizer gets email + notification
+
+# 10. Clinic uploads medical record for Driver Two
+POST /api/v1/medical-records
+Authorization: Bearer <clinic_token>
+Content-Type: multipart/form-data
+{
+  "organizerRequestId": "6aREQUESTID",
+  "driverId": "6aDRIVER2ID000000000000",
+  "result": "Pending",
+  "notes": "Follow-up required",
+  "expiryDate": "2027-06-14"
+}
+# ✅ Driver Two gets email + notification
+# ✅ Organizer gets email + notification
+
+# 11. Organizer views ALL records for their drivers
+GET /api/v1/medical-records/my
+Authorization: Bearer <organizer_token>
+# Returns records for both Driver One and Driver Two
+
+# 12. Driver One views only their own record
+GET /api/v1/medical-records/my
+Authorization: Bearer <driver1_token>
+# Returns only Driver One's record
+
+# 13. Organizer views single record
+GET /api/v1/medical-records/6aRECORDID000000000000
+Authorization: Bearer <organizer_token>
+
+# 14. Driver views single record
+GET /api/v1/medical-records/6aRECORDID000000000000
+Authorization: Bearer <driver1_token>
+
+# ❌ Driver Two cannot see Driver One's record
+GET /api/v1/medical-records/6aRECORD_DRIVER1_ID
+Authorization: Bearer <driver2_token>
+# Response: 403 Forbidden

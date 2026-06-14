@@ -1,0 +1,74 @@
+Here are the structural Postman payload examples for each stage of your application workflow. These structures correspond directly with your flat validation schemas (without the wrapped `body` object).
+
+---
+
+## 1. Create Organizer Request
+
+* **Endpoint:** `POST /api/v1/organizer-requests`
+* **Access Role:** `ORGINIZER`
+* **Description:** Used by an organizer to initialize a new request for services.
+
+```json
+{
+  "serviceId": "65f1a2b3c4d5e6f7a8b9c0d1",
+  "companyName": "Apex Logistics Group",
+  "email": "corporate@apexlogistics.com",
+  "phone": "+15550192834",
+  "location": "742 Evergreen Terrace, Springfield",
+  "totalDriver": "45"
+}
+
+```
+
+---
+
+## 2. Update Organizer Request (General)
+
+* **Endpoint:** `PUT /api/v1/organizer-requests/65f1a2b3c4d5e6f7a8b9c0d2`
+* **Access Role:** `ADMIN`, `SUPERADMIN`, `ORGINIZER`
+* **Description:** Modifies base properties of an existing request. All fields are optional.
+
+```json
+{
+  "companyName": "Apex Logistics International",
+  "phone": "+15559998888",
+  "totalDriver": "50"
+}
+
+```
+
+---
+
+## 3. Assign Clinic and Update Status
+
+* **Endpoint:** `PATCH /api/v1/organizer-requests/assign-clinic/65f1a2b3c4d5e6f7a8b9c0d2`
+* **Access Role:** `ADMIN`, `SUPERADMIN`
+* **Description:** Executed by an administrator to bind a specific clinic to the roster request and shift its workflow status to `Confirmed`.
+
+```json
+{
+  "clinicId": "65f1c9d8e7f6a5b4c3d2e1f0",
+  "status": "Confirmed"
+}
+
+```
+
+---
+
+## 4. Push Driver Roster Array
+
+* **Endpoint:** `POST /api/v1/organizer-requests/65f1a2b3c4d5e6f7a8b9c0d2/drivers`
+* **Access Role:** `ORGINIZER`
+* **Description:** Executed by the organizer *after* the status is set to `Confirmed`. This pushes a flat list of MongoDB ObjectIDs representing the allocated drivers.
+
+```json
+{
+  "driverIds": [
+    "65f1b2a3c4d5e6f7a8b9c0a1",
+    "65f1b2a3c4d5e6f7a8b9c0a2",
+    "65f1b2a3c4d5e6f7a8b9c0a3",
+    "65f1b2a3c4d5e6f7a8b9c0a4"
+  ]
+}
+
+```
