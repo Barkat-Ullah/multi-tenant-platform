@@ -218,6 +218,329 @@ export const inviteClinicEmail = (
 </html>`;
 };
 
+export const clinicAssignedEmail = (
+  clinicName: string,
+  organizerCompany: string,
+  requestId: string,
+  serviceName: string,
+  totalDrivers: string,
+) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>New Request Assigned</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+          <tr>
+            <td style="background-color:#0f6e56;padding:32px 36px;text-align:center;">
+              <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 12px;">
+                <tr>
+                  <td style="background-color:#1d9e75;border-radius:8px;width:36px;height:36px;text-align:center;vertical-align:middle;">
+                    <span style="font-size:18px;line-height:36px;">🏥</span>
+                  </td>
+                  <td style="padding-left:10px;vertical-align:middle;">
+                    <span style="font-size:17px;font-weight:600;color:#e1f5ee;">MediCheck</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0;font-size:12px;color:#9fe1cb;text-transform:uppercase;letter-spacing:1px;">New Request Assigned</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 36px;">
+              <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#0f172a;">Hi ${clinicName},</h1>
+              <p style="margin:0 0 24px;font-size:14px;color:#64748b;line-height:1.7;">
+                A new organizer request has been assigned to your clinic by the admin. Please review the details below and prepare to receive the drivers.
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:24px;">
+                <tr>
+                  <td colspan="2" style="background-color:#0f6e56;padding:12px 16px;">
+                    <p style="margin:0;font-size:11px;font-weight:700;color:#d1fae5;text-transform:uppercase;letter-spacing:1px;">Request Details</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;width:40%;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Request ID</p>
+                    <p style="margin:4px 0 0;font-size:12px;font-weight:600;color:#0f172a;font-family:'Courier New',monospace;">${requestId}</p>
+                  </td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Status</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:700;color:#0f6e56;">✅ Confirmed</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Company</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">🏢 ${organizerCompany}</p>
+                  </td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Service</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">🩺 ${serviceName}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan="2" style="padding:14px 16px;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Total Drivers</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">👥 ${totalDrivers}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px;">
+                <tr>
+                  <td style="background-color:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 16px;">
+                    <table cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="font-size:16px;padding-right:10px;vertical-align:top;">📌</td>
+                        <td style="font-size:13px;color:#166534;line-height:1.6;">
+                          The organizer will send their drivers to your clinic. Once they arrive, please complete the medical assessments and upload the records via the platform.
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <div style="height:1px;background-color:#e2e8f0;"></div>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 36px;text-align:center;">
+              <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#475569;">MediCheck Team</p>
+              <p style="margin:0;font-size:12px;color:#94a3b8;">This is an automated message. Please do not reply.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+export const organizerRequestConfirmedEmail = (
+  organizerName: string,
+  companyName: string,
+  requestId: string,
+  clinicName: string,
+  serviceName: string,
+) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Request Confirmed</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+          <tr>
+            <td style="background-color:#0f172a;padding:32px 36px;text-align:center;">
+              <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 12px;">
+                <tr>
+                  <td style="background-color:#1e293b;border-radius:8px;width:36px;height:36px;text-align:center;vertical-align:middle;">
+                    <span style="font-size:18px;line-height:36px;">✅</span>
+                  </td>
+                  <td style="padding-left:10px;vertical-align:middle;">
+                    <span style="font-size:17px;font-weight:600;color:#f1f5f9;">MediCheck</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Request Confirmed</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 36px;">
+              <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#0f172a;">Hi ${organizerName},</h1>
+              <p style="margin:0 0 24px;font-size:14px;color:#64748b;line-height:1.7;">
+                Your request for <strong>${companyName}</strong> has been confirmed by the admin. A clinic has been assigned — please add your drivers to the request so they can be processed.
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:24px;">
+                <tr>
+                  <td colspan="2" style="background-color:#1e293b;padding:12px 16px;">
+                    <p style="margin:0;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Request Summary</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;width:40%;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Request ID</p>
+                    <p style="margin:4px 0 0;font-size:12px;font-weight:600;color:#0f172a;font-family:'Courier New',monospace;">${requestId}</p>
+                  </td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Assigned Clinic</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">🏥 ${clinicName}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan="2" style="padding:14px 16px;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Service</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">🩺 ${serviceName}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px;">
+                <tr>
+                  <td style="background-color:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px 16px;">
+                    <table cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="font-size:16px;padding-right:10px;vertical-align:top;">👉</td>
+                        <td style="font-size:13px;color:#1e40af;line-height:1.6;">
+                          <strong>Next step:</strong> Log in to the app and add your drivers to this request so the clinic can begin processing them.
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <div style="height:1px;background-color:#e2e8f0;"></div>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 36px;text-align:center;">
+              <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#475569;">MediCheck Team</p>
+              <p style="margin:0;font-size:12px;color:#94a3b8;">This is an automated message. Please do not reply.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+export const newOrganizerRequestAdminEmail = (
+  adminName: string,
+  organizerName: string,
+  companyName: string,
+  requestId: string,
+  serviceName: string,
+  totalDrivers: string,
+  location: string,
+) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>New Organizer Request</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#0f172a;padding:28px 36px;text-align:center;">
+              <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 10px;">
+                <tr>
+                  <td style="background-color:#1e293b;border-radius:8px;width:36px;height:36px;text-align:center;vertical-align:middle;">
+                    <span style="font-size:18px;line-height:36px;">📋</span>
+                  </td>
+                  <td style="padding-left:10px;vertical-align:middle;">
+                    <span style="font-size:17px;font-weight:600;color:#f1f5f9;">MediCheck</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">New Organizer Request</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px 36px;">
+              <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#0f172a;">Hi ${adminName},</h1>
+              <p style="margin:0 0 24px;font-size:14px;color:#64748b;line-height:1.7;">
+                A new organizer request has been submitted and is awaiting your review. Please assign a clinic and confirm the request.
+              </p>
+
+              <!-- Details Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:24px;">
+                <tr>
+                  <td colspan="2" style="background-color:#1e293b;padding:12px 16px;">
+                    <p style="margin:0;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Request Details</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;width:40%;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Request ID</p>
+                    <p style="margin:4px 0 0;font-size:12px;font-weight:600;color:#0f172a;font-family:'Courier New',monospace;">${requestId}</p>
+                  </td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Status</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#d97706;">⏳ Pending Review</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Organizer</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">👤 ${organizerName}</p>
+                  </td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Company</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">🏢 ${companyName}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Service</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">🩺 ${serviceName}</p>
+                  </td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Total Drivers</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">👥 ${totalDrivers}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan="2" style="padding:14px 16px;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Location</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">📍 ${location}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px;">
+                <tr>
+                  <td style="background-color:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px 16px;">
+                    <table cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="font-size:16px;padding-right:10px;vertical-align:top;">⚡</td>
+                        <td style="font-size:13px;color:#c2410c;line-height:1.6;">
+                          Action required: Please log in to the admin panel, assign a clinic, and confirm this request.
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <div style="height:1px;background-color:#e2e8f0;"></div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 36px;text-align:center;">
+              <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#475569;">MediCheck Platform</p>
+              <p style="margin:0;font-size:12px;color:#94a3b8;">Internal admin notification. Do not reply.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
 export const medicalRecordUploadedDriverEmail = (
   driverName: string,
   clinicName: string,

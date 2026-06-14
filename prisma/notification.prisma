@@ -23,6 +23,7 @@ enum NotifyType {
   Message
   Payment
   MedicalRecord
+  OrganizerRequest
 
   // was Appointment*
   BookingCreated

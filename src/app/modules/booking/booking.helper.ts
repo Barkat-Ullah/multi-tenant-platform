@@ -1,6 +1,9 @@
-import { UserRoleEnum } from "@prisma/client";
-import prisma from "../../utils/prisma";
-import emailSender, { paymentSuccessAdminEmail, paymentSuccessDriverEmail } from "../../utils/sendMail";
+import { UserRoleEnum } from '@prisma/client';
+import prisma from '../../utils/prisma';
+import emailSender, {
+  paymentSuccessAdminEmail,
+  paymentSuccessDriverEmail,
+} from '../../utils/sendMail';
 
 export const getAdminAndSuperAdminEmails = async () => {
   const admins = await prisma.user.findMany({
@@ -8,7 +11,7 @@ export const getAdminAndSuperAdminEmails = async () => {
       role: { in: [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN] },
       isDeleted: false,
     },
-    select: { email: true, fullName: true },
+    select: { id: true, email: true, fullName: true },
   });
   return admins;
 };
@@ -39,7 +42,14 @@ export const sendPaymentSuccessMails = async (
   if (driver?.email) {
     emailSender(
       driver.email,
-      paymentSuccessDriverEmail(driver.fullName, bookingId, bookingDateStr, clinicName, amount, paymentMethod),
+      paymentSuccessDriverEmail(
+        driver.fullName,
+        bookingId,
+        bookingDateStr,
+        clinicName,
+        amount,
+        paymentMethod,
+      ),
       'Payment Successful – Booking Confirmed',
     ).catch(err => console.error('Driver payment mail failed:', err));
   }
@@ -47,7 +57,15 @@ export const sendPaymentSuccessMails = async (
   for (const admin of admins) {
     emailSender(
       admin.email,
-      paymentSuccessAdminEmail(admin.fullName, driver?.fullName ?? 'N/A', clinicName, bookingId, bookingDateStr, amount, paymentMethod),
+      paymentSuccessAdminEmail(
+        admin.fullName,
+        driver?.fullName ?? 'N/A',
+        clinicName,
+        bookingId,
+        bookingDateStr,
+        amount,
+        paymentMethod,
+      ),
       'Payment Received for Booking',
     ).catch(err => console.error('Admin payment mail failed:', err));
   }

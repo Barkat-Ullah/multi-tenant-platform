@@ -6,6 +6,12 @@ import { paginationHelper } from '../../utils/calculatePagination';
 import ApiError from '../../errors/AppError';
 import { Request } from 'express';
 import { buildFilterConditions } from './organizerRequest.utils';
+import emailSender, {
+  clinicAssignedEmail,
+  newOrganizerRequestAdminEmail,
+  organizerRequestConfirmedEmail,
+} from '../../utils/sendMail';
+import { getAdminAndSuperAdminEmails } from '../booking/booking.helper';
 
 const baseOrganizerRequestInclude: Prisma.OrganizerRequestInclude = {
   service: true,
@@ -23,10 +29,60 @@ const baseOrganizerRequestInclude: Prisma.OrganizerRequestInclude = {
 const createOrganizerRequest = async (req: Request) => {
   const userId = req.user.id;
   const data = req.body;
-  return await prisma.organizerRequest.create({
+
+  const organizerRequest = await prisma.organizerRequest.create({
     data: { ...data, userId },
     include: baseOrganizerRequestInclude,
   });
+
+  // ----------------------------------------------------------
+  // Fetch organizer + service + admins for notifications
+  // ----------------------------------------------------------
+  const [organizer, admins] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, fullName: true, email: true },
+    }),
+    getAdminAndSuperAdminEmails(),
+  ]);
+
+  const serviceName = organizerRequest.service?.title ?? 'N/A';
+  const companyName = organizerRequest.companyName;
+
+  // ----------------------------------------------------------
+  // Email + Notification → all admins & super admins
+  // ----------------------------------------------------------
+  for (const admin of admins) {
+    // email
+    emailSender(
+      admin.email,
+      newOrganizerRequestAdminEmail(
+        admin.fullName,
+        organizer?.fullName ?? 'Organizer',
+        companyName,
+        organizerRequest.id,
+        serviceName,
+        organizerRequest.totalDriver,
+        organizerRequest.location,
+      ),
+      'New Organizer Request Submitted',
+    ).catch(err => console.error('Admin organizer request mail failed:', err));
+
+    // notification
+    prisma.notification
+      .create({
+        data: {
+          receiverId: admin.id,
+          title: 'New Organizer Request',
+          body: `${organizer?.fullName ?? 'An organizer'} submitted a new request for ${companyName} (${serviceName}).`,
+          type: 'OrganizerRequest',
+          referenceId: organizerRequest.id,
+        },
+      })
+      .catch(err => console.error('Admin notification failed:', err));
+  }
+
+  return organizerRequest;
 };
 
 const getOrganizerRequestList = async (
@@ -167,19 +223,90 @@ const assignClinicAndStatus = async (
   clinicId?: string,
   status: any = 'Confirmed',
 ) => {
-  const existing = await prisma.organizerRequest.findUnique({ where: { id } });
+  const existing = await prisma.organizerRequest.findUnique({
+    where: { id },
+    include: {
+      organizer: { select: { fullName: true, email: true } },
+      service:   { select: { title: true } },
+    },
+  });
+
   if (!existing || existing.isDeleted) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Organizer Request not found');
   }
 
-  return await prisma.organizerRequest.update({
+  const updated = await prisma.organizerRequest.update({
     where: { id },
     data: {
       clinicId: clinicId ?? null,
-      status: status,
+      status,
     },
     include: baseOrganizerRequestInclude,
   });
+
+  // only send mails when status is being set to Confirmed with a clinic
+  if (status === 'Confirmed' && clinicId) {
+    const clinic = await prisma.user.findUnique({
+      where: { id: clinicId },
+      select: { fullName: true, email: true },
+    });
+
+    // email → clinic
+    if (clinic?.email) {
+      emailSender(
+        clinic.email,
+        clinicAssignedEmail(
+          clinic.fullName,
+          existing.companyName,
+          id,
+          existing.service.title,
+          existing.totalDriver,
+        ),
+        'New Organizer Request Assigned to Your Clinic',
+      ).catch(err => console.error('Clinic assign mail failed:', err));
+    }
+
+    // email → organizer
+    if (existing.organizer.email) {
+      emailSender(
+        existing.organizer.email,
+        organizerRequestConfirmedEmail(
+          existing.organizer.fullName,
+          existing.companyName,
+          id,
+          clinic?.fullName ?? 'Assigned Clinic',
+          existing.service.title,
+        ),
+        'Your Request Has Been Confirmed – Add Your Drivers',
+      ).catch(err => console.error('Organizer confirm mail failed:', err));
+    }
+
+    // notification → organizer
+    await prisma.notification.create({
+      data: {
+        receiverId: existing.userId,
+        title: 'Request Confirmed',
+        body: `Your request for ${existing.companyName} has been confirmed. Please add your drivers now.`,
+        type: 'OrganizerRequest',
+        referenceId: id,
+      },
+    });
+
+    // notification → clinic
+    if (clinicId) {
+      await prisma.notification.create({
+        data: {
+          receiverId: clinicId,
+          title: 'New Request Assigned',
+          body: `A new organizer request from ${existing.companyName} has been assigned to your clinic.`,
+          type: 'OrganizerRequest',
+          referenceId: id,
+        },
+      });
+    }
+  }
+
+  return updated;
 };
 
 // Organizer driver push step
