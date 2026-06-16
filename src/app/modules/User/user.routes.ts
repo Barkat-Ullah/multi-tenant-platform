@@ -11,10 +11,20 @@ const router = express.Router();
 
 router.get(
   '/',
-  auth(UserRoleEnum.ADMIN, UserRoleEnum.USER),
+  auth(
+    UserRoleEnum.ADMIN,
+    UserRoleEnum.USER,
+    UserRoleEnum.CLINIC,
+    UserRoleEnum.ORGINIZER,
+    UserRoleEnum.SUPERADMIN,
+  ),
   UserControllers.getAllUsers,
 );
 router.get('/clinics', authOptional(), UserControllers.getAllClinics);
+//
+router.get('/org-driver', auth(), UserControllers.getAllOrgDriver);
+router.get('/org-driver-reports', auth(UserRoleEnum.ORGINIZER), UserControllers.getAllOrgDriverReports);
+//
 router.get(
   '/me',
   auth(
@@ -28,7 +38,13 @@ router.get(
 );
 router.get('/:id', authOptional(), UserControllers.getUserDetails);
 
+router.post(
+  '/org-driver',
+  auth(UserRoleEnum.ADMIN,UserRoleEnum.ORGINIZER),
+  UserControllers.createOrgDriver,
+);
 //clinic
+
 router.post(
   '/create-clinic',
   auth(UserRoleEnum.ADMIN),

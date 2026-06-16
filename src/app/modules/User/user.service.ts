@@ -4,6 +4,7 @@ import {
   Prisma,
   User,
   UserRoleEnum,
+  UserStatus,
 } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { Request } from 'express';
@@ -17,9 +18,11 @@ import emailSender, { inviteClinicEmail } from '../../utils/sendMail';
 type IUserFilterRequest = {
   searchTerm?: string;
   status?: string;
+  role?: UserRoleEnum;
 };
 
 const getAllUsersFromDB = async (
+  req: Request,
   options: IPaginationOptions,
   filters: IUserFilterRequest,
 ) => {
@@ -28,11 +31,21 @@ const getAllUsersFromDB = async (
 
   const andConditions: Prisma.UserWhereInput[] = [];
 
-  andConditions.push({
-    role: UserRoleEnum.USER,
-    isDeleted: false,
-  });
+  andConditions.push({ isDeleted: false });
 
+  // Role filter: specific role if provided, otherwise all allowed roles
+  andConditions.push({
+    role: filterData.role
+      ? filterData.role
+      : {
+          in: [
+            UserRoleEnum.USER,
+            UserRoleEnum.ADMIN,
+            UserRoleEnum.CLINIC,
+            UserRoleEnum.ORGINIZER,
+          ],
+        },
+  });
   // Search by name or email
   if (searchTerm) {
     andConditions.push({
@@ -57,7 +70,16 @@ const getAllUsersFromDB = async (
   const whereConditions: Prisma.UserWhereInput =
     andConditions.length > 0
       ? { AND: andConditions }
-      : { role: UserRoleEnum.USER };
+      : {
+          role: {
+            in: [
+              UserRoleEnum.USER,
+              UserRoleEnum.ADMIN,
+              UserRoleEnum.CLINIC,
+              UserRoleEnum.ORGINIZER,
+            ],
+          },
+        };
 
   const users = await prisma.user.findMany({
     where: whereConditions,
@@ -67,6 +89,7 @@ const getAllUsersFromDB = async (
       email: true,
       image: true,
       status: true,
+      role: true,
       createdAt: true,
     },
     orderBy: { createdAt: 'desc' },
@@ -84,6 +107,8 @@ const getAllUsersFromDB = async (
     email: user.email,
     image: user.image,
     status: user.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED',
+    role: user.role,
+    joinDate: user.createdAt,
   }));
 
   return {
@@ -137,6 +162,183 @@ const getUserDetailsFromDB = async (id: string) => {
   return user;
 };
 
+//
+const createOrgDriverIntoDB = async (req: Request) => {
+  const organizerId = req.user.id;
+  const { fullName, email, phoneNumber, password = '123456' } = req.body;
+
+  const result = await prisma.user.create({
+    data: {
+      organizerId,
+      fullName,
+      email,
+      phoneNumber,
+      password,
+    },
+  });
+  return result;
+};
+
+const getAllOrgDriverFromDB = async (
+  req: Request,
+  options: IPaginationOptions,
+  filters: { searchTerm?: string; status?: UserStatus },
+) => {
+  const { page, limit, skip } = paginationHelper.calculatePagination(options);
+  const { searchTerm, status } = filters;
+
+  const andConditions: Prisma.UserWhereInput[] = [
+    { organizerId: req.user.id },
+    { isDeleted: false },
+    { role: UserRoleEnum.USER },
+  ];
+
+  if (searchTerm) {
+    andConditions.push({
+      OR: [
+        { fullName: { contains: searchTerm, mode: 'insensitive' } },
+        { email: { contains: searchTerm, mode: 'insensitive' } },
+      ],
+    });
+  }
+
+  if (status) {
+    andConditions.push({ status });
+  }
+
+  const whereConditions: Prisma.UserWhereInput = { AND: andConditions };
+
+  const [drivers, total] = await Promise.all([
+    prisma.user.findMany({
+      where: whereConditions,
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        image: true,
+        status: true,
+        medicalRecords: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            result: true,
+            expiryDate: true,
+            createdAt: true,
+            organizerRequest: {
+              select: {
+                service: {
+                  select: { title: true },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.user.count({ where: whereConditions }),
+  ]);
+
+  const data = drivers.map(driver => {
+    const latestRecord = driver.medicalRecords?.[0] ?? null;
+
+    return {
+      id: driver.id,
+      fullName: driver.fullName,
+      email: driver.email,
+      image: driver.image,
+      lastMedical: latestRecord?.createdAt ?? null,
+      expiryDate: latestRecord?.expiryDate ?? null,
+      service: latestRecord?.organizerRequest?.service?.title ?? null,
+      medicalResult: latestRecord?.result ?? "Pending",
+    };
+  });
+
+  return {
+    meta: { total, page, limit },
+    data,
+  };
+};
+
+const getAllOrgDriverReportsFromDB = async (
+  req: Request,
+  options: IPaginationOptions,
+  filters: { searchTerm?: string },
+) => {
+  const { page, limit, skip } = paginationHelper.calculatePagination(options);
+  const { searchTerm } = filters;
+
+  // Get all driver ids belonging to this organizer
+  const driverIds = await prisma.user.findMany({
+    where: { organizerId: req.user.id, isDeleted: false },
+    select: { id: true },
+  });
+  const driverIdList = driverIds.map(d => d.id);
+
+  const andConditions: Prisma.MedicalRecordWhereInput[] = [
+    { driverId: { in: driverIdList } },
+  ];
+
+  if (searchTerm) {
+    andConditions.push({
+      OR: [
+        { driver: { fullName: { contains: searchTerm, mode: 'insensitive' } } },
+        { clinic: { fullName: { contains: searchTerm, mode: 'insensitive' } } },
+        {
+          organizerRequest: {
+            service: { title: { contains: searchTerm, mode: 'insensitive' } },
+          },
+        },
+      ],
+    });
+  }
+
+  const whereConditions: Prisma.MedicalRecordWhereInput = {
+    AND: andConditions,
+  };
+
+  const [records, total] = await Promise.all([
+    prisma.medicalRecord.findMany({
+      where: whereConditions,
+      select: {
+        id: true,
+        files: true,
+        createdAt: true,
+        driver: {
+          select: { id: true, fullName: true, image: true },
+        },
+        clinic: {
+          select: { id: true, fullName: true },
+        },
+        organizerRequest: {
+          select: {
+            service: { select: { id: true, title: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.medicalRecord.count({ where: whereConditions }),
+  ]);
+
+  const data = records.map(record => ({
+    id: record.id,
+    title: record.organizerRequest?.service?.title ?? 'N/A',
+    driverName: record.driver?.fullName ?? 'N/A',
+    generatedDate: record.createdAt,
+    hospitalName: record.clinic?.fullName ?? 'N/A',
+    fileUrl: record.files ?? null,
+  }));
+
+  return {
+    meta: { total, page, limit },
+    data,
+  };
+};
 //clinic
 
 const createClinicIntoDB = async (req: Request) => {
@@ -735,4 +937,8 @@ export const UserServices = {
   createClinicIntoDB,
   getAllClinicsFromDB,
   updateClinicIntoDB,
+  //org
+  createOrgDriverIntoDB,
+  getAllOrgDriverFromDB,
+  getAllOrgDriverReportsFromDB,
 };

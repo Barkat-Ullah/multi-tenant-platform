@@ -4,11 +4,11 @@ import sendResponse from '../../utils/sendResponse';
 import { UserServices } from './user.service';
 import pick from '../../utils/pickValidFields';
 
-const getFilterableFields = ['searchTerm', 'status'];
+const getFilterableFields = ['searchTerm', 'status', 'role'];
 const getAllUsers = catchAsync(async (req, res) => {
   const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
   const filters = pick(req.query, getFilterableFields);
-  const result = await UserServices.getAllUsersFromDB(options, filters);
+  const result = await UserServices.getAllUsersFromDB(req, options, filters);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -19,7 +19,7 @@ const getAllUsers = catchAsync(async (req, res) => {
 const getAllClinics = catchAsync(async (req, res) => {
   const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
   const filters = pick(req.query, getFilterableFields);
-  const result = await UserServices.getAllClinicsFromDB(req,options, filters);
+  const result = await UserServices.getAllClinicsFromDB(req, options, filters);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -27,6 +27,48 @@ const getAllClinics = catchAsync(async (req, res) => {
     ...result,
   });
 });
+
+//org
+const getAllOrgDriver = catchAsync(async (req, res) => {
+  const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
+  const filters = pick(req.query, getFilterableFields);
+  const result = await UserServices.getAllOrgDriverFromDB(
+    req,
+    options,
+    filters,
+  );
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Org retrieved successfully',
+    ...result,
+  });
+});
+
+const getAllOrgDriverReports = catchAsync(async (req, res) => {
+  const options = pick(req.query, ['page', 'limit']);
+  const filters = pick(req.query, ['searchTerm']);
+
+  const result = await UserServices.getAllOrgDriverReportsFromDB(req, options, filters);
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Reports retrieved successfully',
+    meta: result.meta,
+    data: result.data,
+  });
+});
+
+const createOrgDriver = catchAsync(async (req, res) => {
+  const result = await UserServices.createOrgDriverIntoDB(req);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Driver created successfully',
+    data: result,
+  });
+});
+
 const getMyimage = catchAsync(async (req, res) => {
   const id = req.user.id;
   const result = await UserServices.getMyimageFromDB(id);
@@ -164,5 +206,9 @@ export const UserControllers = {
   //clinic
   createClinic,
   getAllClinics,
-  updateClinic
+  updateClinic,
+  //org
+  createOrgDriver,
+  getAllOrgDriver,
+  getAllOrgDriverReports
 };

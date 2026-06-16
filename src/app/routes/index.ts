@@ -3,17 +3,22 @@ import { notificationsRoute } from '../modules/Notifications/Notification.routes
 import { paymentRoutes } from '../modules/Payment/payment.routes';
 import { AuthRouters } from '../modules/Auth/Auth.routes';
 import { UserRouters } from '../modules/User/user.routes';
-import { serviceRoutes } from "../modules/service/service.routes";
-import { locationRoutes } from "../modules/location/location.routes";
+import { serviceRoutes } from '../modules/service/service.routes';
+import { locationRoutes } from '../modules/location/location.routes';
 import { clinicAvailabilityRoutes } from '../modules/timeSlot/timeSlot.routes';
-import { bookingRoutes } from "../modules/booking/booking.routes";
+import { bookingRoutes } from '../modules/booking/booking.routes';
 import { methodRoutes } from '../modules/paymethod/paymethod.route';
-import { medicalRecordRoutes } from "../modules/medicalRecord/medicalRecord.routes";
-import { organizerRequestRoutes } from "../modules/organizerRequest/organizerRequest.routes";
+import { medicalRecordRoutes } from '../modules/medicalRecord/medicalRecord.routes';
+import { organizerRequestRoutes } from '../modules/organizerRequest/organizerRequest.routes';
+import { analyticsRouter } from '../modules/analytics/analytics.route';
 
 const router = express.Router();
 
 const moduleRoutes = [
+  {
+    path: '/analytics',
+    route: analyticsRouter,
+  },
   {
     path: '/auth',
     route: AuthRouters,
@@ -31,35 +36,35 @@ const moduleRoutes = [
     route: paymentRoutes,
   },
   {
-    path: "/services",
+    path: '/services',
     route: serviceRoutes,
   },
 
   {
-    path: "/locations",
+    path: '/locations',
     route: locationRoutes,
   },
 
   {
-    path: "/timeslots",
+    path: '/timeslots',
     route: clinicAvailabilityRoutes,
   },
   {
-    path: "/bookings",
+    path: '/bookings',
     route: bookingRoutes,
   },
   {
-    path: "/method",
+    path: '/method',
     route: methodRoutes,
   },
 
   {
-    path: "/medical-records",
+    path: '/medical-records',
     route: medicalRecordRoutes,
   },
 
   {
-    path: "/organizer-requests",
+    path: '/organizer-requests',
     route: organizerRequestRoutes,
   },
 ];
