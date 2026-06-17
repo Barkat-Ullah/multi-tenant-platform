@@ -29,7 +29,7 @@ router.post(
 
 router.post(
   '/change-password',
-  auth(UserRoleEnum.USER, UserRoleEnum.ADMIN),
+  auth(UserRoleEnum.USER, UserRoleEnum.ADMIN,UserRoleEnum.SUPERADMIN,UserRoleEnum.CLINIC,UserRoleEnum.ORGINIZER),
   AuthControllers.changePassword,
 );
 

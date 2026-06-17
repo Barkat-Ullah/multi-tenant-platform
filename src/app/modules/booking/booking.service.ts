@@ -72,7 +72,15 @@ const createBooking = async (req: Request) => {
 
   const clinic = await prisma.user.findFirst({
     where: { id: clinicId, role: UserRoleEnum.CLINIC, isDeleted: false },
-    select: { id: true, fullName: true },
+    select: {
+      id: true,
+      fullName: true,
+      location: {
+        select: {
+          id: true,
+        },
+      },
+    },
   });
   if (!clinic) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Clinic not found');
@@ -162,6 +170,16 @@ const createBooking = async (req: Request) => {
       },
     });
 
+    if (clinic.location?.id) {
+      await prisma.location.update({
+        where: {
+          id: clinic.location?.id,
+        },
+        data: {
+          totalBookings: { increment: 1 },
+        },
+      });
+    }
     await tx.auditLog.create({
       data: {
         actorId: driverId,
@@ -492,7 +510,7 @@ const getBookingListForAdminAndSuperAdmin = async (
   const whereConditions: Prisma.BookingWhereInput =
     andConditions.length > 0 ? { AND: andConditions } : {};
 
-  const [result, total] = await Promise.all([
+  const [result, total, confirmed, pending, cancelled] = await Promise.all([
     prisma.booking.findMany({
       skip,
       take: limit,
@@ -501,9 +519,15 @@ const getBookingListForAdminAndSuperAdmin = async (
       select: bookingSelect,
     }),
     prisma.booking.count({ where: whereConditions }),
+    prisma.booking.count({ where: { status: BookingStatus.CONFIRMED } }),
+    prisma.booking.count({ where: { status: BookingStatus.PENDING } }),
+    prisma.booking.count({ where: { status: BookingStatus.CANCELLED } }),
   ]);
 
-  return { meta: { total, page, limit }, data: result };
+  return {
+    meta: { total, page, limit, confirmed, pending, cancelled },
+    data: result,
+  };
 };
 
 // -------------------------------------------------------
@@ -664,7 +688,10 @@ const cancelBooking = async (req: Request) => {
 
   const booking = await prisma.booking.findUnique({
     where: { id },
-    include: { timeSlot: true },
+    include: {
+      timeSlot: true,
+      clinic: { select: { location: { select: { id: true } } } },
+    },
   });
 
   if (!booking) {
@@ -706,7 +733,7 @@ const cancelBooking = async (req: Request) => {
     // }
 
     if (booking.timeSlotId) {
-      const slot = await tx.timeSlot.update({
+      await tx.timeSlot.update({
         where: { id: booking.timeSlotId },
         data: {
           booked: { decrement: 1 },
@@ -720,6 +747,12 @@ const cancelBooking = async (req: Request) => {
       data: { status: BookingStatus.CANCELLED },
       select: bookingSelect,
     });
+
+    if (booking.clinic.location?.id)
+      await tx.location.update({
+        where: { id },
+        data: { totalBookings: { decrement: 1 } },
+      });
 
     // audit
     await tx.auditLog.create({
