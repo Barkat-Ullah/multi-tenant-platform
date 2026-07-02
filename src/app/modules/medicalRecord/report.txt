@@ -1,5 +1,5 @@
 POST /api/v1/medical-records
-Authorization: Bearer <clinic_token>
+Authorization: <clinic_token>
 Content-Type: multipart/form-data
 
 bookingId        : 6a2cccea7c920d65fed14ecf

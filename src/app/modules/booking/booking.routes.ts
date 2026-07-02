@@ -34,6 +34,13 @@ router.get(
   bookingController.getBookingList,
 );
 
+// admin/superadmin/clinic — calendar view with bookings + organizer requests
+router.get(
+  '/calendar',
+  auth(UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN, UserRoleEnum.CLINIC),
+  bookingController.getBookingCalendarList,
+);
+
 // driver/clinic — see own bookings
 router.get('/my', auth('ANY'), bookingController.getMyBooking);
 

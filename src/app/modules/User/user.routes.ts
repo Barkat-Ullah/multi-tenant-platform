@@ -91,8 +91,8 @@ router.put(
 );
 
 router.put(
-  '/update-image',
-  auth(UserRoleEnum.ADMIN, UserRoleEnum.USER),
+  '/update-profile',
+  auth(UserRoleEnum.ADMIN, UserRoleEnum.USER, UserRoleEnum.CLINIC, UserRoleEnum.ORGINIZER, UserRoleEnum.SUPERADMIN),
   fileUploader.uploadSingle, // "image"
   UserControllers.updateMyimage,
 );

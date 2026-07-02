@@ -14,6 +14,7 @@ import { IPaginationOptions } from '../../interface/pagination.type';
 import { paginationHelper } from '../../utils/calculatePagination';
 import * as bcrypt from 'bcrypt';
 import emailSender, { inviteClinicEmail } from '../../utils/sendMail';
+import { fileUploader } from '../../utils/fileUploader';
 
 type IUserFilterRequest = {
   searchTerm?: string;
@@ -252,7 +253,7 @@ const getAllOrgDriverFromDB = async (
       lastMedical: latestRecord?.createdAt ?? null,
       expiryDate: latestRecord?.expiryDate ?? null,
       service: latestRecord?.organizerRequest?.service?.title ?? null,
-      medicalResult: latestRecord?.result ?? "Pending",
+      medicalResult: latestRecord?.result ?? 'Pending',
     };
   });
 
@@ -896,9 +897,12 @@ const updateMyimageIntoDB = async (
 
   let imageUrl: string | null = null;
   if (file) {
-    // const location = await fileUploader.uploadToCloudinaryWithType(file );
-    // imageUrl = location.Location;
-    // updateData.image = imageUrl;
+    const location = await fileUploader.uploadToCloudinaryWithType(
+      file,
+      'image',
+    );
+    imageUrl = location.Location;
+    updateData.image = imageUrl;
   }
 
   // Always update (with or without file)

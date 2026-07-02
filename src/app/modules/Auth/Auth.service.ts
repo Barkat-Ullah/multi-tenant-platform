@@ -252,7 +252,7 @@ const resendVerificationWithOtp = async (email: string) => {
     throw new AppError(
       httpStatus.INTERNAL_SERVER_ERROR,
       'Failed to send OTP email',
-    );
+    ); 
   }
 
   return {

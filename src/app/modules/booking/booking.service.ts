@@ -15,6 +15,7 @@ import { bookingSelect } from './booking.select';
 import { buildFilterConditions } from './booking.utils';
 import { stripe } from '../../utils/stripe';
 import config from '../../../config';
+import { buildFilterConditions as buildOrganizerRequestFilterConditions } from '../organizerRequest/organizerRequest.utils';
 import {
   createPaypalOrder,
   getPaypalAccessToken,
@@ -38,7 +39,129 @@ type IBookingFilterRequest = {
   clinicId?: string;
   driverId?: string;
   locationId?: string;
+  period?: string; // Daily, Weekly, Monthly (current day, week, month)
 };
+
+type CalendarPeriod = 'daily' | 'weekly' | 'monthly';
+
+const getDateRangeByPeriod = (period: CalendarPeriod) => {
+  const now = new Date();
+
+  if (period === 'daily') {
+    return {
+      rangeStart: new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      ),
+      rangeEnd: new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      ),
+    };
+  }
+
+  if (period === 'weekly') {
+    const utcDay = now.getUTCDay();
+    const diffToMonday = utcDay === 0 ? 6 : utcDay - 1;
+
+    const rangeStart = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() - diffToMonday,
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+
+    return {
+      rangeStart,
+      rangeEnd: new Date(
+        Date.UTC(
+          rangeStart.getUTCFullYear(),
+          rangeStart.getUTCMonth(),
+          rangeStart.getUTCDate() + 6,
+          23,
+          59,
+          59,
+          999,
+        ),
+      ),
+    };
+  }
+
+  return {
+    rangeStart: new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
+    ),
+    rangeEnd: new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
+    ),
+  };
+};
+
+const normalizeCalendarPeriod = (period?: string): CalendarPeriod => {
+  const normalized = period?.toLowerCase();
+
+  if (
+    normalized === 'daily' ||
+    normalized === 'weekly' ||
+    normalized === 'monthly'
+  ) {
+    return normalized;
+  }
+
+  return 'weekly';
+};
+
+const organizerRequestSelect = {
+  id: true,
+  userId: true,
+  serviceId: true,
+  clinicId: true,
+  companyName: true,
+  email: true,
+  phone: true,
+  location: true,
+  totalDriver: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+  service: {
+    select: {
+      id: true,
+      title: true,
+    },
+  },
+  clinic: {
+    select: {
+      id: true,
+      fullName: true,
+    },
+  },
+  organizer: {
+    select: {
+      id: true,
+      fullName: true,
+    },
+  },
+} satisfies Prisma.OrganizerRequestSelect;
 
 const bookingSearchAbleFields = [
   'driver.fullName',
@@ -531,6 +654,150 @@ const getBookingListForAdminAndSuperAdmin = async (
 };
 
 // -------------------------------------------------------
+
+// -------------------------------------------------------
+const getBookingListCallenderForAdminAndSuperAdminClinic = async (
+  req: Request,
+  options: IPaginationOptions,
+  filters: IBookingFilterRequest,
+) => {
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  const { page, limit, skip } = paginationHelper.calculatePagination(options);
+  const { searchTerm, period, ...filterData } = filters;
+  const calendarPeriod = normalizeCalendarPeriod(period);
+  const { rangeStart, rangeEnd } = getDateRangeByPeriod(calendarPeriod);
+  const organizerRequestFilterData = {
+    id: filterData.id,
+    createdAt: filterData.createdAt,
+    status: filterData.status,
+    clinicId: filterData.clinicId,
+  };
+
+  const bookingAndConditions: Prisma.BookingWhereInput[] = [
+    {
+      scheduledAt: {
+        gte: rangeStart,
+        lte: rangeEnd,
+      },
+    },
+  ];
+  const organizerRequestAndConditions: Prisma.OrganizerRequestWhereInput[] = [
+    {
+      createdAt: {
+        gte: rangeStart,
+        lte: rangeEnd,
+      },
+    },
+  ];
+
+  if (userRole === UserRoleEnum.CLINIC) {
+    bookingAndConditions.push({ clinicId: userId });
+    organizerRequestAndConditions.push({ clinicId: userId });
+  }
+
+  if (searchTerm) {
+    bookingAndConditions.push({
+      OR: [
+        { driver: { fullName: { contains: searchTerm, mode: 'insensitive' } } },
+        { driver: { email: { equals: searchTerm, mode: 'insensitive' } } },
+        { clinic: { fullName: { contains: searchTerm, mode: 'insensitive' } } },
+      ],
+    });
+
+    organizerRequestAndConditions.push({
+      OR: [
+        { companyName: { contains: searchTerm, mode: 'insensitive' } },
+        { email: { contains: searchTerm, mode: 'insensitive' } },
+        { phone: { contains: searchTerm, mode: 'insensitive' } },
+        { location: { contains: searchTerm, mode: 'insensitive' } },
+      ],
+    });
+  }
+
+  if (Object.keys(filterData).length) {
+    bookingAndConditions.push(...buildFilterConditions(filterData));
+    organizerRequestAndConditions.push(
+      ...buildOrganizerRequestFilterConditions(organizerRequestFilterData),
+    );
+  }
+
+  const bookingWhereConditions: Prisma.BookingWhereInput = {
+    AND: bookingAndConditions,
+  };
+  const organizerRequestWhereConditions: Prisma.OrganizerRequestWhereInput = {
+    AND: organizerRequestAndConditions,
+  };
+
+  const [bookings, bookingTotal, organizerRequests, organizerRequestTotal] =
+    await Promise.all([
+      prisma.booking.findMany({
+        where: bookingWhereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          driverId: true,
+          clinicId: true,
+          serviceId: true,
+          scheduledAt: true,
+          status: true,
+          createdAt: true,
+          driver: { select: { id: true, fullName: true, email: true } },
+          service: { select: { id: true, title: true } },
+          clinic: { select: { id: true, fullName: true } },
+        },
+      }),
+
+      prisma.booking.count({ where: bookingWhereConditions }),
+      prisma.organizerRequest.findMany({
+        where: organizerRequestWhereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: organizerRequestSelect,
+      }),
+      prisma.organizerRequest.count({ where: organizerRequestWhereConditions }),
+    ]);
+
+  return {
+    meta: {
+      total: bookingTotal + organizerRequestTotal,
+      bookingTotal,
+      organizerRequestTotal,
+      page,
+      limit,
+      period: calendarPeriod,
+      rangeStart,
+      rangeEnd,
+    },
+    data: {
+      // bookings,
+      // organizerRequests,
+      events: [
+        ...bookings.map(booking => ({
+          type: 'booking' as const,
+          id: booking.id,
+          title: booking.service?.title ?? booking.clinic.fullName,
+          start: booking.scheduledAt,
+          status: booking.status,
+          clinicId: booking.clinicId,
+          driverId: booking.driverId,
+          payload: booking,
+        })),
+        ...organizerRequests.map(request => ({
+          type: 'organizerRequest' as const,
+          id: request.id,
+          title: request.companyName,
+          start: request.createdAt,
+          status: request.status,
+          clinicId: request.clinicId,
+          organizerId: request.userId,
+          payload: request,
+        })),
+      ],
+    },
+  };
+};
+
+// -------------------------------------------------------
 // get Booking by id
 // -------------------------------------------------------
 const getBookingById = async (req: Request) => {
@@ -1017,6 +1284,7 @@ export const bookingService = {
   verifyStripePayment,
   //
   getBookingListForAdminAndSuperAdmin,
+  getBookingListCallenderForAdminAndSuperAdminClinic,
   getBookingById,
   getMyBooking,
   updateBooking,

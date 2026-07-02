@@ -2,6 +2,7 @@ import { NextFunction, Request, RequestHandler, Response } from 'express';
 import catchAsync from '../../utils/catchAsync';
 import sendResponse from '../../utils/sendResponse';
 import { notificationServices } from '../Notifications/Notification.service';
+import pick from '../../utils/pickValidFields';
 
 const sseNotifyController: RequestHandler = (
   req: Request,
@@ -47,17 +48,21 @@ const getMyNotification = catchAsync(async (req, res) => {
     data: result.notifications,
   });
 });
-
 const getNotifications = catchAsync(async (req: any, res: any) => {
-  const notifications = await notificationServices.getNotificationsFromDB(req);
-
+  const options = pick(req.query, ['page', 'limit']);
+  const result = await notificationServices.getNotificationsFromDB(
+    req,
+    options,
+  );
   sendResponse(res, {
     statusCode: 200,
     success: true,
-    message: 'Notifications retrieved successfully',
-    data: notifications,
+    message: 'Notifications fetched successfully',
+    meta: result.meta,
+    data: result.data,
   });
 });
+
 
 const getSingleNotificationById = catchAsync(async (req: any, res: any) => {
   const notificationId = req.params.notificationId;

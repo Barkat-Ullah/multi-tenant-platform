@@ -4,6 +4,8 @@ import { prisma } from '../../utils/prisma';
 import admin from './firebaseAdmin';
 import { Request, RequestHandler } from 'express';
 import { addSSEClient, removeSSEClient } from './sse';
+import { IPaginationOptions } from '../../interface/pagination.type';
+import { paginationHelper } from '../../utils/calculatePagination';
 
 type SendNotificationParams = {
   userId: string;
@@ -197,7 +199,7 @@ const sendNotifications = async (req: Request) => {
 
     const failedTokens = response.responses
       .map((res: any, idx: number) => (!res.success ? fcmTokens[idx] : null))
-      .filter((token:string | null): token is string => token !== null);
+      .filter((token: string | null): token is string => token !== null);
 
     return {
       successCount: response.successCount,
@@ -209,23 +211,23 @@ const sendNotifications = async (req: Request) => {
   }
 };
 
-
 // Fetch notifications for the current user
 
-const getNotificationsFromDB = async (req: any) => {
-  try {
-    const userId = req.user.id;
+const getNotificationsFromDB = async (
+  req: any,
+  options: IPaginationOptions,
+) => {
+  const userId = req.user.id;
 
-    // Validate user ID
-    if (!userId) {
-      throw new AppError(400, 'User ID is required');
-    }
+  if (!userId) {
+    throw new AppError(400, 'User ID is required');
+  }
 
-    // Fetch notifications for the current user
-    const notifications = await prisma.notification.findMany({
-      where: {
-        receiverId: userId,
-      },
+  const { page, limit, skip } = paginationHelper.calculatePagination(options);
+
+  const [notifications, total] = await Promise.all([
+    prisma.notification.findMany({
+      where: { receiverId: userId },
       include: {
         sender: {
           select: {
@@ -234,15 +236,22 @@ const getNotificationsFromDB = async (req: any) => {
           },
         },
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.notification.count({
+      where: { receiverId: userId },
+    }),
+  ]);
 
-    // Check if notifications exist
-
-    // Return formatted notifications
-    return notifications.map(notification => ({
+  return {
+    meta: {
+      total,
+      page,
+      limit,
+    },
+    data: notifications.map(notification => ({
       id: notification.id,
       title: notification.title,
       body: notification.body,
@@ -251,10 +260,8 @@ const getNotificationsFromDB = async (req: any) => {
       sender: {
         id: notification?.sender?.id,
       },
-    }));
-  } catch (error: any) {
-    throw new AppError(500, error.message || 'Failed to fetch notifications');
-  }
+    })),
+  };
 };
 
 // Fetch a single notification and mark it as read

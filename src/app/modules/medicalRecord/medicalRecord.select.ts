@@ -19,6 +19,7 @@ export const medicalRecordSelect = {
   expiryDate: true,
   createdAt: true,
   updatedAt: true,
+  clinic: { select: { email: true } }, // ← uncomment to include relation
   // booking: { select: { id: true } }, // ← uncomment to include relation
   // driver: { select: { id: true } }, // ← uncomment to include relation
 } satisfies Prisma.MedicalRecordSelect;

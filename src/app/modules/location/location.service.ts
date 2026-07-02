@@ -5,7 +5,6 @@ import { IPaginationOptions } from '../../interface/pagination.type';
 import { paginationHelper } from '../../utils/calculatePagination';
 import ApiError from '../../errors/AppError';
 import { Request } from 'express';
-import { handleFileUploads } from '../../utils/handleFile';
 import { locationSelect } from './location.select';
 import { buildFilterConditions } from './location.utils';
 
@@ -73,6 +72,140 @@ const getLocationList = async (
 
   return { meta: { total, page, limit }, data: result };
 };
+
+
+// const getLocationList = async (
+//   options: IPaginationOptions,
+//   filters: ILocationFilterRequest,
+//   userLat?: number,
+//   userLng?: number,
+// ) => {
+//   const { page, limit, skip } = paginationHelper.calculatePagination(options);
+//   const { searchTerm, ...filterData } = filters;
+
+//   const andConditions: Prisma.LocationWhereInput[] = [{ isDeleted: false }];
+
+//   if (searchTerm) {
+//     andConditions.push({
+//       OR: locationSearchAbleFields.map(field => ({
+//         [field]: { contains: searchTerm, mode: 'insensitive' },
+//       })),
+//     });
+//   }
+
+//   if (Object.keys(filterData).length) {
+//     andConditions.push(...buildFilterConditions(filterData));
+//   }
+
+//   const whereConditions: Prisma.LocationWhereInput =
+//     andConditions.length > 0 ? { AND: andConditions } : {};
+
+//   const now = new Date();
+
+//   const [locations, total] = await Promise.all([
+//     prisma.location.findMany({
+//       skip,
+//       take: limit,
+//       where: whereConditions,
+//       orderBy: { createdAt: 'desc' },
+//       select: {
+//         id: true,
+//         locationName: true,
+//         lat: true,
+//         lng: true,
+//         totalBookings: true,
+//         totalClinicsAdded: true,
+//         createdAt: true,
+//         clinic: {
+//           where: { isDeleted: false },
+//           select: {
+//             id: true,
+//             fullName: true,
+//             isParking: true,
+//             clinicServices: {
+//               select: {
+//                 service: { select: { id: true, title: true } },
+//               },
+//             },
+//             clinicAvailabilities: {
+//               where: {
+//                 isActive: true,
+//                 slotDate: { gte: now },
+//               },
+//               orderBy: { slotDate: 'asc' },
+//               take: 1,
+//               select: {
+//                 slotDate: true,
+//                 timeSlots: {
+//                   where: { isBooked: false, status: 'Active' },
+//                   orderBy: { startTime: 'asc' },
+//                   take: 1,
+//                   select: { startTime: true },
+//                 },
+//               },
+//             },
+//           },
+//         },
+//       },
+//     }),
+//     prisma.location.count({ where: whereConditions }),
+//   ]);
+
+//   const data = locations.map(location => ({
+//     id: location.id,
+//     locationName: location.locationName,
+//     lat: location.lat,
+//     lng: location.lng,
+//     totalBookings: location.totalBookings,
+//     totalClinicsAdded: location.totalClinicsAdded,
+//     clinics: location.clinic.map(clinic => {
+//       // get earliest available slot date
+//       const earliestAvailability = clinic.clinicAvailabilities[0];
+//       const earliestAppointment = earliestAvailability?.slotDate ?? null;
+//       const earliestSlotTime = earliestAvailability?.timeSlots[0]?.startTime ?? null;
+
+//       // calculate distance if user coords provided
+//       const distance = userLat && userLng
+//         ? calculateDistance(userLat, userLng, location.lat, location.lng)
+//         : null;
+
+//       return {
+//         id: clinic.id,
+//         fullName: clinic.fullName,
+//         isParking: clinic.isParking,
+//         // services: clinic.clinicServices.map(cs => cs.service),
+//         earliestAppointment,               // "2026-06-06T00:00:00.000Z"
+//         earliestSlotTime,                  // "09:00"
+//         // distance: distance ? `${distance.toFixed(1)} mile` : null,
+//       };
+//     }),
+//   }));
+
+//   return { meta: { total, page, limit }, data };
+// };
+
+// -------------------------------------------------------
+// helper — Haversine formula to calculate distance in miles
+// -------------------------------------------------------
+
+const calculateDistance = (
+  lat1: number, lng1: number,
+  lat2: number, lng2: number,
+): number => {
+  const R = 3958.8; // Earth radius in miles
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+const toRad = (value: number) => (value * Math.PI) / 180;
 
 // -------------------------------------------------------
 // get Location by id

@@ -43,6 +43,7 @@ const bookingFilterableFields = [
   'clinicId',
   'driverId',
   'locationId',
+  'period',
 ];
 
 const getBookingList = catchAsync(async (req: Request, res: Response) => {
@@ -60,6 +61,26 @@ const getBookingList = catchAsync(async (req: Request, res: Response) => {
     meta: result.meta,
   });
 });
+
+const getBookingCalendarList = catchAsync(
+  async (req: Request, res: Response) => {
+    const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
+    const filters = pick(req.query, bookingFilterableFields);
+    const result =
+      await bookingService.getBookingListCallenderForAdminAndSuperAdminClinic(
+        req,
+        options,
+        filters,
+      );
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: 'Calendar booking list retrieved successfully',
+      data: result.data,
+      meta: result.meta,
+    });
+  },
+);
 
 const getBookingById = catchAsync(async (req: Request, res: Response) => {
   const result = await bookingService.getBookingById(req);
@@ -141,6 +162,7 @@ export const bookingController = {
   verifyPaypalPayment,
   verifyStripePayment,
   getBookingList,
+  getBookingCalendarList,
   getBookingById,
   getMyBooking,
   updateBooking,

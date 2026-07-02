@@ -1,5 +1,5 @@
 import httpStatus from 'http-status';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRoleEnum, UserStatus } from '@prisma/client';
 import prisma from '../../utils/prisma';
 import { IPaginationOptions } from '../../interface/pagination.type';
 import { paginationHelper } from '../../utils/calculatePagination';
@@ -117,7 +117,14 @@ const getOrganizerRequestList = async (
     AND: andConditions,
   };
 
-  const [result, total] = await Promise.all([
+  const [
+    result,
+    total,
+    corporateClients,
+    activeCorporate,
+    monthlyBookings,
+    reqCorporates,
+  ] = await Promise.all([
     prisma.organizerRequest.findMany({
       skip,
       take: limit,
@@ -126,9 +133,41 @@ const getOrganizerRequestList = async (
       include: baseOrganizerRequestInclude,
     }),
     prisma.organizerRequest.count({ where: whereConditions }),
+    prisma.user.count({
+      where: { role: UserRoleEnum.ORGINIZER, isDeleted: false },
+    }),
+    prisma.user.count({
+      where: {
+        role: UserRoleEnum.ORGINIZER,
+        status: UserStatus.ACTIVE,
+        isDeleted: false,
+      },
+    }),
+    prisma.organizerRequest.count({
+      where: {
+        isDeleted: false,
+        createdAt: {
+          gte: new Date(new Date().setDate(new Date().getDate() - 30)),
+        },
+      },
+    }),
+    prisma.organizerRequest.count({
+      where: { isDeleted: false, status: 'Pending' },
+    }),
   ]);
 
-  return { meta: { total, page, limit }, data: result };
+  return {
+    meta: {
+      total,
+      page,
+      limit,
+      corporateClients,
+      activeCorporate,
+      monthlyBookings,
+      reqCorporates,
+    },
+    data: result,
+  };
 };
 
 const getOrganizerRequestById = async (id: string, user: any) => {
@@ -227,7 +266,7 @@ const assignClinicAndStatus = async (
     where: { id },
     include: {
       organizer: { select: { fullName: true, email: true } },
-      service:   { select: { title: true } },
+      service: { select: { title: true } },
     },
   });
 

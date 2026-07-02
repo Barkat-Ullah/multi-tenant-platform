@@ -10,18 +10,28 @@ const getDateRangeByPeriod = (period: Period) => {
   const now = new Date();
 
   if (period === 'daily') {
-    const start = new Date(Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-      0, 0, 0, 0,
-    ));
-    const end = new Date(Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-      23, 59, 59, 999,
-    ));
+    const start = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const end = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
     return { rangeStart: start, rangeEnd: end };
   }
 
@@ -29,26 +39,40 @@ const getDateRangeByPeriod = (period: Period) => {
     const utcDay = now.getUTCDay(); // 0 = Sun ... 6 = Sat
     const diffToMonday = utcDay === 0 ? 6 : utcDay - 1;
 
-    const start = new Date(Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() - diffToMonday,
-      0, 0, 0, 0,
-    ));
+    const start = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() - diffToMonday,
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
 
-    const end = new Date(Date.UTC(
-      start.getUTCFullYear(),
-      start.getUTCMonth(),
-      start.getUTCDate() + 6,
-      23, 59, 59, 999,
-    ));
+    const end = new Date(
+      Date.UTC(
+        start.getUTCFullYear(),
+        start.getUTCMonth(),
+        start.getUTCDate() + 6,
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
 
     return { rangeStart: start, rangeEnd: end };
   }
 
   // monthly (default)
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
+  );
+  const end = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
+  );
 
   return { rangeStart: start, rangeEnd: end };
 };
@@ -58,12 +82,28 @@ const getDateRangeByPeriod = (period: Period) => {
 // -------------------------------------------------------
 const getUTCTodayRange = () => {
   const now = new Date();
-  const todayStart = new Date(Date.UTC(
-    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0,
-  ));
-  const todayEnd = new Date(Date.UTC(
-    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999,
-  ));
+  const todayStart = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      0,
+      0,
+      0,
+      0,
+    ),
+  );
+  const todayEnd = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      23,
+      59,
+      59,
+      999,
+    ),
+  );
   return { todayStart, todayEnd };
 };
 
@@ -72,8 +112,12 @@ const getUTCTodayRange = () => {
 // -------------------------------------------------------
 const getUTCMonthRange = () => {
   const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
-  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
+  );
+  const monthEnd = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
+  );
   return { monthStart, monthEnd };
 };
 
@@ -93,7 +137,20 @@ const getYearlyTrend = async () => {
     select: { createdAt: true, amount: true },
   });
 
-  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const monthNames = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
   return monthNames.map((month, idx) => {
     const bookingCount = bookingsThisYear.filter(
       b => b.createdAt.getUTCMonth() === idx,
@@ -117,6 +174,8 @@ const getAdminAnalytics = async (period: Period = 'monthly') => {
     periodRevenue,
     activeLocations,
     recentBookings,
+    recentMedicalRecords,
+    totalServices,
     topServices,
   ] = await Promise.all([
     prisma.booking.count({
@@ -142,16 +201,46 @@ const getAdminAnalytics = async (period: Period = 'monthly') => {
         service: { select: { title: true } },
       },
     }),
+    prisma.medicalRecord.findMany({
+      take: 5,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        result: true,
+        files: true,
+        createdAt: true,
+        driver: { select: { id: true, fullName: true } },
+        clinic: { select: { id: true, fullName: true } },
+        booking: {
+          select: {
+            id: true,
+            scheduledAt: true,
+            status: true,
+            service: { select: { id: true, title: true } },
+          },
+        },
+        organizerRequest: {
+          select: {
+            id: true,
+            companyName: true,
+            service: { select: { id: true, title: true } },
+          },
+        },
+      },
+    }),
+    prisma.service.count({ where: { isDeleted: false } }),
     prisma.booking.groupBy({
       by: ['serviceId'],
       where: { serviceId: { not: null } },
       _count: { serviceId: true },
       orderBy: { _count: { serviceId: 'desc' } },
-      take: 5,
+      take: 3,
     }),
   ]);
 
-  const serviceIds = topServices.map(s => s.serviceId).filter(Boolean) as string[];
+  const serviceIds = topServices
+    .map(s => s.serviceId)
+    .filter(Boolean) as string[];
   const services = await prisma.service.findMany({
     where: { id: { in: serviceIds } },
     select: { id: true, title: true },
@@ -169,6 +258,7 @@ const getAdminAnalytics = async (period: Period = 'monthly') => {
       pendingBookings,
       revenue: periodRevenue._sum.amount ?? 0,
       activeLocations,
+      totalServices,
     },
     trend,
     recentBookings: recentBookings.map(b => ({
@@ -177,6 +267,21 @@ const getAdminAnalytics = async (period: Period = 'monthly') => {
       service: b.service?.title ?? 'N/A',
       scheduledAt: b.scheduledAt,
       status: b.status,
+    })),
+    recentMedicalRecords: recentMedicalRecords.map(record => ({
+      id: record.id,
+      result: record.result,
+      files: record.files,
+      createdAt: record.createdAt,
+      driverName: record.driver.fullName,
+      clinicName: record.clinic.fullName,
+      bookingId: record.booking?.id ?? null,
+      service:
+        record.booking?.service?.title ??
+        record.organizerRequest?.service?.title ??
+        'N/A',
+      organizerRequestId: record.organizerRequest?.id ?? null,
+      companyName: record.organizerRequest?.companyName ?? null,
     })),
     topServices: topServices.map(s => ({
       serviceId: s.serviceId,
@@ -247,29 +352,64 @@ const getDriverAnalytics = async (driverId: string) => {
 const getOrganizerAnalytics = async (organizerId: string) => {
   const now = new Date();
 
-  const expiryWindowEnd = new Date(Date.UTC(
-    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 30, 23, 59, 59, 999,
-  ));
+  const expiryWindowEnd = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 30,
+      23,
+      59,
+      59,
+      999,
+    ),
+  );
 
-  const [totalDrivers, upcomingBookings, expiringDriversCount] = await Promise.all([
-    prisma.user.count({
-      where: { organizerId, role: UserRoleEnum.USER, isDeleted: false },
-    }),
-    prisma.booking.count({
-      where: {
-        driver: { organizerId },
-        scheduledAt: { gte: now },
-        status: { in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
-      },
-    }),
-    prisma.user.count({
-      where: {
-        organizerId,
-        role: UserRoleEnum.USER,
-        medicalExpiry: { gte: now, lte: expiryWindowEnd },
-      },
-    }),
-  ]);
+  const [
+    totalDrivers,
+    upcomingBookings,
+    expiringDriversCount,
+    totalOrganizerRequests,
+    recentOrganizerRequests,
+  ] =
+    await Promise.all([
+      prisma.user.count({
+        where: { organizerId, role: UserRoleEnum.USER, isDeleted: false },
+      }),
+      prisma.booking.count({
+        where: {
+          driver: { organizerId },
+          scheduledAt: { gte: now },
+          status: { in: [BookingStatus.PENDING, BookingStatus.CONFIRMED] },
+        },
+      }),
+      prisma.user.count({
+        where: {
+          organizerId,
+          role: UserRoleEnum.USER,
+          medicalExpiry: { gte: now, lte: expiryWindowEnd },
+        },
+      }),
+      prisma.organizerRequest.count({
+        where: { userId: organizerId, isDeleted: false },
+      }),
+      prisma.organizerRequest.findMany({
+        where: { userId: organizerId, isDeleted: false },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          companyName: true,
+          email: true,
+          phone: true,
+          location: true,
+          totalDriver: true,
+          status: true,
+          createdAt: true,
+          clinic: { select: { id: true, fullName: true } },
+          service: { select: { id: true, title: true } },
+        },
+      }),
+    ]);
 
   const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
   const bookingsThisYear = await prisma.booking.findMany({
@@ -277,10 +417,24 @@ const getOrganizerAnalytics = async (organizerId: string) => {
     select: { createdAt: true },
   });
 
-  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const monthNames = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
   const bookingHistory = monthNames.map((month, idx) => ({
     month,
-    bookings: bookingsThisYear.filter(b => b.createdAt.getUTCMonth() === idx).length,
+    bookings: bookingsThisYear.filter(b => b.createdAt.getUTCMonth() === idx)
+      .length,
   }));
 
   return {
@@ -289,8 +443,19 @@ const getOrganizerAnalytics = async (organizerId: string) => {
       upcomingBookings,
       expiringTimeMonths: 12,
       expiringDriversCount,
+      totalOrganizerRequests,
     },
     bookingHistory,
+    recentOrganizerRequests: recentOrganizerRequests.map(request => ({
+      id: request.id,
+      companyName: request.companyName,
+      service: request.service.title,
+      clinicName: request.clinic?.fullName ?? 'N/A',
+      status: request.status,
+      createdAt: request.createdAt,
+      totalDriver: request.totalDriver,
+      location: request.location,
+    })),
   };
 };
 
