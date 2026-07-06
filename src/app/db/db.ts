@@ -10,9 +10,9 @@ export const initiateSuperAdmin = async () => {
   );
   const payload: any = {
     fullName: 'Super Admin',
-    email: 'super-admin@gmail.com',
+    email: 'superadmin@gmail.com',
     password: hashedPassword,
-    role: UserRoleEnum.ADMIN,
+    role: UserRoleEnum.SUPERADMIN,
     isEmailVerified: true,
     status: UserStatus.ACTIVE,
   };

@@ -354,7 +354,18 @@ const addDriversToRequest = async (
   organizerId: string,
   driverIds: string[],
 ) => {
-  const request = await prisma.organizerRequest.findUnique({ where: { id } });
+  const request = await prisma.organizerRequest.findUnique({
+    where: { id },
+    select: { totalDriver: true, isDeleted: true, userId: true, status: true },
+  });
+  const expectedCount = Number(request?.totalDriver?.trim());
+
+  if (Number.isNaN(expectedCount) || expectedCount !== driverIds.length) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Driver count mismatch: Expected ${request?.totalDriver}, but got ${driverIds.length}`,
+    );
+  }
 
   if (!request || request.isDeleted) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Organizer Request not found');
@@ -395,6 +406,7 @@ const addDriversToRequest = async (
 const softDeleteOrganizerRequest = async (id: string) => {
   const existing = await prisma.organizerRequest.findUnique({
     where: { id, isDeleted: false },
+    select: { isDeleted: true },
   });
   if (!existing) {
     throw new ApiError(

@@ -146,7 +146,7 @@ const updateUserApproval = catchAsync(async (req, res) => {
 });
 
 const softDeleteUser = catchAsync(async (req, res) => {
-  const id = req.user.id;
+ const { id } = req.params;
   const result = await UserServices.softDeleteUserIntoDB(id);
 
   sendResponse(res, {

@@ -56,7 +56,7 @@ router.put(
   UserControllers.updateClinic,
 );
 
-router.delete('/soft-delete', auth('ANY'), UserControllers.softDeleteUser);
+router.delete('/soft-delete/:id', auth('ANY'), UserControllers.softDeleteUser);
 router.delete(
   '/hard-delete/:id',
   auth(UserRoleEnum.ADMIN),

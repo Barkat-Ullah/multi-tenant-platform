@@ -168,6 +168,14 @@ const createOrgDriverIntoDB = async (req: Request) => {
   const organizerId = req.user.id;
   const { fullName, email, phoneNumber, password = '123456' } = req.body;
 
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (existingUser) {
+    throw new ApiError(httpStatus.CONFLICT, 'Email already in use');
+  }
+
   const result = await prisma.user.create({
     data: {
       organizerId,
