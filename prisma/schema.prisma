@@ -155,5 +155,23 @@ model Faq {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@map("modelnames")
+  @@map("faqs")
+}
+
+model Privacy {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("privacies")
+}
+
+model Terms {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("terms")
 }

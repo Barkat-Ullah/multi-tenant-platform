@@ -52,7 +52,7 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
-app.get('/payment/success', async (req: Request, res: Response) => {
+app.get('/payment/success',auth(), async (req: Request, res: Response) => {
   const sessionId = req.query.session_id as string;
   const bookingId = req.query.bookingId as string;
 
@@ -150,7 +150,7 @@ app.get('/payment/success', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/payment/cancel', (req: Request, res: Response) => {
+app.get('/payment/cancel', auth(), (req: Request, res: Response) => {
   res.status(200).json({
     success: false,
     message: 'Payment was cancelled. No charge was made.',

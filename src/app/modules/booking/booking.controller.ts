@@ -44,6 +44,8 @@ const bookingFilterableFields = [
   'driverId',
   'locationId',
   'period',
+  'rangeStartDay',
+  'rangeEndDay',
 ];
 
 const getBookingList = catchAsync(async (req: Request, res: Response) => {

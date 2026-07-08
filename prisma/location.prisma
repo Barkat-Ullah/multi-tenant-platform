@@ -4,6 +4,7 @@ model Location {
     locationName      String
     lat               Float    @default(0.0)
     lng               Float    @default(0.0)
+    image             String?
     totalBookings     Int      @default(0)
     totalClinicsAdded Int      @default(0)
     isDeleted         Boolean  @default(false)
@@ -11,7 +12,7 @@ model Location {
     updatedAt         DateTime @updatedAt
     // relation
     admin             User     @relation("LocationCreateAdmin", fields: [adminId], references: [id])
-    clinic             User[]
+    clinic            User[]
 
     @@map("locations")
 }

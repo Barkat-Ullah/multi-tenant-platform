@@ -232,12 +232,27 @@ const getMyOrganizerRequest = async (
       take: limit,
       where: whereConditions,
       orderBy: { createdAt: 'desc' },
-      include: baseOrganizerRequestInclude,
+      include: {
+        ...baseOrganizerRequestInclude,
+        _count: { select: { drivers: true } },
+      },
     }),
     prisma.organizerRequest.count({ where: whereConditions }),
   ]);
 
-  return { meta: { total, page, limit }, data: result };
+  const data = result.map(item => {
+    const expectedCount = Number(item.totalDriver?.trim());
+    const addedCount = item._count.drivers;
+
+    const rosterStatus =
+      !Number.isNaN(expectedCount) && expectedCount === addedCount
+        ? 'Block'
+        : 'Open';
+
+    return { ...item, rosterStatus };
+  });
+
+  return { meta: { total, page, limit }, data };
 };
 
 const updateOrganizerRequest = async (req: Request) => {
@@ -358,14 +373,6 @@ const addDriversToRequest = async (
     where: { id },
     select: { totalDriver: true, isDeleted: true, userId: true, status: true },
   });
-  const expectedCount = Number(request?.totalDriver?.trim());
-
-  if (Number.isNaN(expectedCount) || expectedCount !== driverIds.length) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      `Driver count mismatch: Expected ${request?.totalDriver}, but got ${driverIds.length}`,
-    );
-  }
 
   if (!request || request.isDeleted) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Organizer Request not found');
@@ -383,6 +390,15 @@ const addDriversToRequest = async (
     );
   }
 
+  const expectedCount = Number(request.totalDriver?.trim());
+
+  if (Number.isNaN(expectedCount) || driverIds.length > expectedCount) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      `Driver count exceeds expected: Expected max ${request.totalDriver}, but got ${driverIds.length}`,
+    );
+  }
+
   const createManyPayload = driverIds.map(driverId => ({
     driverId,
     organizerRequestId: id,
@@ -397,10 +413,16 @@ const addDriversToRequest = async (
     }),
   ]);
 
-  return await prisma.organizerRequest.findUnique({
+  const updatedRequest = await prisma.organizerRequest.findUnique({
     where: { id },
     include: baseOrganizerRequestInclude,
   });
+
+  return {
+    ...updatedRequest,
+    totalDriversAdded: driverIds.length,
+    expectedDriverCount: expectedCount,
+  };
 };
 
 const softDeleteOrganizerRequest = async (id: string) => {

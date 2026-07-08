@@ -7,6 +7,7 @@ import ApiError from '../../errors/AppError';
 import { Request } from 'express';
 import { locationSelect } from './location.select';
 import { buildFilterConditions } from './location.utils';
+import { handleFileUploads } from '../../utils/handleFile';
 
 // -------------------------------------------------------
 // create Location
@@ -14,8 +15,13 @@ import { buildFilterConditions } from './location.utils';
 const createLocation = async (req: Request) => {
   const userId = req.user.id;
   const data = req.body;
+  const files = req.files as
+    | { [fieldname: string]: Express.Multer.File[] }
+    | undefined;
 
-  const addedData = { ...data, adminId: userId };
+  const uploadedFiles = await handleFileUploads(files);
+
+  const addedData = { ...data, adminId: userId, image: uploadedFiles.image };
   const result = await prisma.location.create({
     data: addedData,
     select: locationSelect,
@@ -72,7 +78,6 @@ const getLocationList = async (
 
   return { meta: { total, page, limit }, data: result };
 };
-
 
 // const getLocationList = async (
 //   options: IPaginationOptions,
@@ -189,8 +194,10 @@ const getLocationList = async (
 // -------------------------------------------------------
 
 const calculateDistance = (
-  lat1: number, lng1: number,
-  lat2: number, lng2: number,
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
 ): number => {
   const R = 3958.8; // Earth radius in miles
   const dLat = toRad(lat2 - lat1);
@@ -198,8 +205,10 @@ const calculateDistance = (
 
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
@@ -270,6 +279,11 @@ const getMyLocation = async (
 const updateLocation = async (req: Request) => {
   const { id } = req.params;
   const data = req.body;
+  const files = req.files as
+    | { [fieldname: string]: Express.Multer.File[] }
+    | undefined;
+
+  const uploadedFiles = await handleFileUploads(files);
   const existingLocation = await prisma.location.findUnique({ where: { id } });
   if (!existingLocation) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Location not found');
@@ -281,6 +295,7 @@ const updateLocation = async (req: Request) => {
       locationName: data.locationName ?? (existingLocation as any).locationName,
       lat: data.lat ?? (existingLocation as any).lat,
       lng: data.lng ?? (existingLocation as any).lng,
+      image: uploadedFiles.image ?? (existingLocation as any).image,
     },
     select: locationSelect,
   });

@@ -39,7 +39,9 @@ type IBookingFilterRequest = {
   clinicId?: string;
   driverId?: string;
   locationId?: string;
-  period?: string; // Daily, Weekly, Monthly (current day, week, month)
+  period?: string; // daily, weekly, monthly (current day, week, month)
+  rangeStartDay?: string; // ISO date string
+  rangeEndDay?: string; // ISO date string
 };
 
 type CalendarPeriod = 'daily' | 'weekly' | 'monthly';
@@ -116,6 +118,52 @@ const getDateRangeByPeriod = (period: CalendarPeriod) => {
   };
 };
 
+// NEW: parse custom range from query params, validate as full UTC days
+const getCustomDateRange = (rangeStartDay: string, rangeEndDay: string) => {
+  const start = new Date(rangeStartDay);
+  const end = new Date(rangeEndDay);
+
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'Invalid rangeStartDay or rangeEndDay format. Use YYYY-MM-DD.',
+    );
+  }
+
+  if (start > end) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'rangeStartDay cannot be after rangeEndDay',
+    );
+  }
+
+  const rangeStart = new Date(
+    Date.UTC(
+      start.getUTCFullYear(),
+      start.getUTCMonth(),
+      start.getUTCDate(),
+      0,
+      0,
+      0,
+      0,
+    ),
+  );
+
+  const rangeEnd = new Date(
+    Date.UTC(
+      end.getUTCFullYear(),
+      end.getUTCMonth(),
+      end.getUTCDate(),
+      23,
+      59,
+      59,
+      999,
+    ),
+  );
+
+  return { rangeStart, rangeEnd };
+};
+
 const normalizeCalendarPeriod = (period?: string): CalendarPeriod => {
   const normalized = period?.toLowerCase();
 
@@ -170,9 +218,8 @@ const bookingSearchAbleFields = [
 ];
 
 // -------------------------------------------------------
-// create Booking — DRIVER ONLY
+// CREATE BOOKING
 // -------------------------------------------------------
-
 const createBooking = async (req: Request) => {
   const driverId = req.user.id;
   const userRole = req.user.role;
@@ -255,105 +302,113 @@ const createBooking = async (req: Request) => {
     });
   }
 
-  // create booking + payment record (PENDING)
-  const { booking, payment } = await prisma.$transaction(async tx => {
-    await tx.timeSlot.update({
-      where: { id: timeSlotId },
-      data: { booked: { increment: 1 }, isBooked: true },
-    });
+  // -------------------------------------------------------
+  // DB TRANSACTION
+  // -------------------------------------------------------
+  const { booking, payment } = await prisma.$transaction(
+    async tx => {
+      // ATOMIC RE-CHECK: Race condition handler
+      const slotUpdate = await tx.timeSlot.updateMany({
+        where: { id: timeSlotId, booked: { lt: timeSlot.capacity } },
+        data: { booked: { increment: 1 }, isBooked: true },
+      });
 
-    // if (updatedSlot.booked >= updatedSlot.capacity) {
-    //   await tx.timeSlot.update({
-    //     where: { id: timeSlotId },
-    //     data: { isBooked: true },
-    //   });
-    // }
+      if (slotUpdate.count === 0) {
+        throw new ApiError(
+          httpStatus.BAD_REQUEST,
+          'This time slot is fully booked',
+        );
+      }
 
-    const booking = await tx.booking.create({
-      data: {
-        driverId,
-        clinicId,
-        timeSlotId,
-        serviceId,
-        scheduledAt: new Date(scheduledAt),
-        status: BookingStatus.PENDING,
-        paymethodId: payMethod!.id,
-      },
-      select: bookingSelect,
-    });
-
-    const payment = await tx.payment.create({
-      data: {
-        userId: driverId,
-        bookingId: booking.id,
-        amount: price,
-        currency: 'usd',
-        status: 'PENDING',
-        paymentMethodType: paymentType,
-      },
-    });
-
-    if (clinic.location?.id) {
-      await prisma.location.update({
-        where: {
-          id: clinic.location?.id,
-        },
+      const booking = await tx.booking.create({
         data: {
-          totalBookings: { increment: 1 },
+          driverId,
+          clinicId,
+          timeSlotId,
+          serviceId,
+          scheduledAt: new Date(scheduledAt),
+          status: BookingStatus.PENDING,
+          paymethodId: payMethod!.id,
+        },
+        select: bookingSelect,
+      });
+
+      const payment = await tx.payment.create({
+        data: {
+          userId: driverId,
+          bookingId: booking.id,
+          amount: price,
+          currency: 'usd',
+          status: 'PENDING',
+          paymentMethodType: paymentType,
         },
       });
-    }
-    await tx.auditLog.create({
-      data: {
-        actorId: driverId,
-        action: 'BOOKING_CREATED',
-        targetModel: 'Booking',
-        targetId: booking.id,
-        metadata: { clinicId, timeSlotId, paymentType, price },
-      },
-    });
 
-    await tx.notification.create({
-      data: {
-        receiverId: driverId,
-        title: 'Booking Created',
-        body: 'Your appointment has been booked. Complete payment to confirm.',
-        type: 'BookingCreated',
-        referenceId: booking.id,
-      },
-    });
+      if (clinic.location?.id) {
+        await tx.location.update({
+          where: { id: clinic.location.id },
+          data: { totalBookings: { increment: 1 } },
+        });
+      }
 
-    await tx.notification.create({
-      data: {
-        receiverId: clinicId,
-        senderId: driverId,
-        title: 'New Booking Received',
-        body: `A driver has booked a slot on ${new Date(scheduledAt).toDateString()}.`,
-        type: 'BookingCreated',
-        referenceId: booking.id,
-      },
-    });
+      await tx.auditLog.create({
+        data: {
+          actorId: driverId,
+          action: 'BOOKING_CREATED',
+          targetModel: 'Booking',
+          targetId: booking.id,
+          metadata: { clinicId, timeSlotId, paymentType, price },
+        },
+      });
 
-    return { booking, payment };
-  });
+      await tx.notification.create({
+        data: {
+          receiverId: driverId,
+          title: 'Booking Created',
+          body: 'Your appointment has been booked. Complete payment to confirm.',
+          type: 'BookingCreated',
+          referenceId: booking.id,
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          receiverId: clinicId,
+          senderId: driverId,
+          title: 'New Booking Received',
+          body: `A driver has booked a slot on ${new Date(scheduledAt).toDateString()}.`,
+          type: 'BookingCreated',
+          referenceId: booking.id,
+        },
+      });
+
+      return { booking, payment };
+    },
+    {
+      timeout: 15000,
+    },
+  );
 
   // -------------------------------------------------------
-  // Send booking created emails (fire-and-forget)
+  // Send booking created emails (Awaited sequentially/parallelly to secure Vercel execution)
   // -------------------------------------------------------
   const bookingDateStr = new Date(scheduledAt).toDateString();
+  const mailPromises: Promise<any>[] = [];
 
   if (driver?.email) {
-    emailSender(
-      driver.email,
-      bookingCreatedDriverEmail(
-        driver.fullName,
-        clinic.fullName,
-        booking.id,
-        bookingDateStr,
-        `${timeSlot.startTime} - ${timeSlot.endTime}`,
-      ),
-      'Booking Created – Complete Payment to Confirm',
-    ).catch(err => console.error('Driver booking mail failed:', err));
+    mailPromises.push(
+      emailSender(
+        driver.email,
+        bookingCreatedDriverEmail(
+          driver.fullName,
+          clinic.fullName,
+          booking.id,
+          bookingDateStr,
+          `${timeSlot.startTime} - ${timeSlot.endTime}`,
+        ),
+        'Booking Created – Complete Payment to Confirm',
+      ).catch(err => console.error('Driver booking mail failed:', err)),
+    );
   }
 
   const clinicUser = await prisma.user.findUnique({
@@ -362,74 +417,92 @@ const createBooking = async (req: Request) => {
   });
 
   if (clinicUser?.email) {
-    emailSender(
-      clinicUser.email,
-      bookingCreatedClinicEmail(
-        clinicUser.fullName,
-        booking.id,
-        bookingDateStr,
-        `${timeSlot.startTime} - ${timeSlot.endTime}`,
-      ),
-      'New Booking Received',
-    ).catch(err => console.error('Clinic booking mail failed:', err));
+    mailPromises.push(
+      emailSender(
+        clinicUser.email,
+        bookingCreatedClinicEmail(
+          clinicUser.fullName,
+          booking.id,
+          bookingDateStr,
+          `${timeSlot.startTime} - ${timeSlot.endTime}`,
+        ),
+        'New Booking Received',
+      ).catch(err => console.error('Clinic booking mail failed:', err)),
+    );
   }
 
   for (const admin of admins) {
-    emailSender(
-      admin.email,
-      bookingCreatedAdminEmail(
-        admin.fullName,
-        driver?.fullName ?? 'N/A',
-        clinic.fullName,
-        booking.id,
-        bookingDateStr,
-      ),
-      'New Booking Created',
-    ).catch(err => console.error('Admin booking mail failed:', err));
+    mailPromises.push(
+      emailSender(
+        admin.email,
+        bookingCreatedAdminEmail(
+          admin.fullName,
+          driver?.fullName ?? 'N/A',
+          clinic.fullName,
+          booking.id,
+          bookingDateStr,
+        ),
+        'New Booking Created',
+      ).catch(err => console.error('Admin booking mail failed:', err)),
+    );
   }
 
-  // generate payment link
+  if (mailPromises.length > 0) {
+    await Promise.all(mailPromises);
+  }
+
+  // -------------------------------------------------------
+  // GENERATE PAYMENT LINK
+  // -------------------------------------------------------
   let paymentUrl: string;
 
-  if (paymentType === PayType.Stripe) {
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: `Medical appointment - ${clinic.fullName}`,
+  try {
+    if (paymentType === PayType.Stripe) {
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price_data: {
+              currency: 'usd',
+              product_data: {
+                name: `Medical appointment - ${clinic.fullName}`,
+              },
+              unit_amount: Math.round(price * 100),
             },
-            unit_amount: Math.round(price * 100),
+            quantity: 1,
           },
-          quantity: 1,
+        ],
+        metadata: {
+          bookingId: booking.id,
+          paymentId: payment.id,
         },
-      ],
-      metadata: {
-        bookingId: booking.id,
-        paymentId: payment.id,
-      },
-      success_url: `${config.base_url_client}/payment/success?bookingId=${booking.id}&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${config.base_url_client}/payment/cancel?bookingId=${booking.id}`,
-    });
+        success_url: `${config.base_url_client}/payment/success?bookingId=${booking.id}&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${config.base_url_client}/payment/cancel?bookingId=${booking.id}`,
+      });
 
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: { stripeSessionId: session.id },
-    });
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { stripeSessionId: session.id },
+      });
 
-    paymentUrl = session.url!;
-  } else {
-    const order = await createPaypalOrder(price, booking.id);
+      paymentUrl = session.url!;
+    } else {
+      const order = await createPaypalOrder(price, booking.id);
 
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: { paypalOrderId: order.orderId },
-    });
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { paypalOrderId: order.orderId },
+      });
 
-    paymentUrl = order.approveUrl!;
+      paymentUrl = order.approveUrl!;
+    }
+  } catch (paymentError) {
+    console.error('Payment Session Creation Failed:', paymentError);
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      'Booking created successfully, but failed to generate payment gateway link. Please retry payment from your dashboard.',
+    );
   }
 
   return {
@@ -445,7 +518,7 @@ const createBooking = async (req: Request) => {
 };
 
 // -------------------------------------------------------
-// verify Stripe payment — called by frontend after redirect
+// VERIFY STRIPE PAYMENT
 // -------------------------------------------------------
 const verifyStripePayment = async (req: Request) => {
   const { sessionId } = req.query as { sessionId: string };
@@ -467,7 +540,6 @@ const verifyStripePayment = async (req: Request) => {
 
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
 
-  // already processed — avoid double confirmation
   if (payment?.status === 'SUCCESS') {
     return {
       status: 'success',
@@ -476,37 +548,36 @@ const verifyStripePayment = async (req: Request) => {
     };
   }
 
-  const booking = await prisma.$transaction(async tx => {
-    await tx.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: 'SUCCESS',
-        stripePaymentId: session.payment_intent as string,
-      },
-    });
+  const booking = await prisma.$transaction(
+    async tx => {
+      await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: 'SUCCESS',
+          stripePaymentId: session.payment_intent as string,
+        },
+      });
 
-    const updated = await tx.booking.update({
-      where: { id: bookingId },
-      data: { status: BookingStatus.CONFIRMED },
-      select: bookingSelect,
-    });
+      const updated = await tx.booking.update({
+        where: { id: bookingId },
+        data: { status: BookingStatus.CONFIRMED },
+        select: bookingSelect,
+      });
 
-    const fullBooking = await tx.booking.findUnique({
-      where: { id: bookingId },
-    });
+      await tx.notification.create({
+        data: {
+          receiverId: (updated as any).driverId || payment?.userId,
+          title: 'Payment Successful',
+          body: 'Your payment was received and your booking is confirmed.',
+          type: 'Payment',
+          referenceId: bookingId,
+        },
+      });
 
-    await tx.notification.create({
-      data: {
-        receiverId: fullBooking!.driverId,
-        title: 'Payment Successful',
-        body: 'Your payment was received and your booking is confirmed.',
-        type: 'Payment',
-        referenceId: bookingId,
-      },
-    });
-
-    return updated;
-  });
+      return updated;
+    },
+    { timeout: 15000 },
+  );
 
   const stripeBooking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -514,7 +585,7 @@ const verifyStripePayment = async (req: Request) => {
   });
 
   if (stripeBooking) {
-    sendPaymentSuccessMails(
+    await sendPaymentSuccessMails(
       bookingId,
       stripeBooking.driverId,
       session.amount_total ? session.amount_total / 100 : 0,
@@ -526,7 +597,7 @@ const verifyStripePayment = async (req: Request) => {
 };
 
 // -------------------------------------------------------
-// verify PayPal payment — called by frontend after approval
+// VERIFY PAYPAL PAYMENT
 // -------------------------------------------------------
 const verifyPaypalPayment = async (req: Request) => {
   const { orderId } = req.body;
@@ -558,8 +629,11 @@ const verifyPaypalPayment = async (req: Request) => {
     where: { paypalOrderId: orderId },
   });
 
-  if (!payment) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Payment record not found');
+  if (!payment || !payment.bookingId) {
+    throw new ApiError(
+      httpStatus.NOT_FOUND,
+      'Valid payment/booking record not found',
+    );
   }
 
   if (payment.status === 'SUCCESS') {
@@ -570,33 +644,36 @@ const verifyPaypalPayment = async (req: Request) => {
     };
   }
 
-  const booking = await prisma.$transaction(async tx => {
-    await tx.payment.update({
-      where: { id: payment.id },
-      data: { status: 'SUCCESS' },
-    });
+  const booking = await prisma.$transaction(
+    async tx => {
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: { status: 'SUCCESS' },
+      });
 
-    const updated = await tx.booking.update({
-      where: { id: payment.bookingId! },
-      data: { status: BookingStatus.CONFIRMED },
-      select: bookingSelect,
-    });
+      const updated = await tx.booking.update({
+        where: { id: payment.bookingId as string }, // FIXED: removed risky non-null assertion (!)
+        data: { status: BookingStatus.CONFIRMED },
+        select: bookingSelect,
+      });
 
-    await tx.notification.create({
-      data: {
-        receiverId: payment.userId,
-        title: 'Payment Successful',
-        body: 'Your payment was received and your booking is confirmed.',
-        type: 'Payment',
-        referenceId: payment.bookingId!,
-      },
-    });
+      await tx.notification.create({
+        data: {
+          receiverId: payment.userId,
+          title: 'Payment Successful',
+          body: 'Your payment was received and your booking is confirmed.',
+          type: 'Payment',
+          referenceId: payment.bookingId,
+        },
+      });
 
-    return updated;
-  });
+      return updated;
+    },
+    { timeout: 15000 },
+  );
 
-  sendPaymentSuccessMails(
-    payment.bookingId!,
+  await sendPaymentSuccessMails(
+    payment.bookingId,
     payment.userId,
     payment.amount,
     'PayPal',
@@ -604,6 +681,7 @@ const verifyPaypalPayment = async (req: Request) => {
 
   return { status: 'success', booking };
 };
+
 // -------------------------------------------------------
 // get all Booking — ADMIN / SUPERADMIN with filters
 // -------------------------------------------------------
@@ -664,9 +742,16 @@ const getBookingListCallenderForAdminAndSuperAdminClinic = async (
   const userId = req.user.id;
   const userRole = req.user.role;
   const { page, limit, skip } = paginationHelper.calculatePagination(options);
-  const { searchTerm, period, ...filterData } = filters;
+  const { searchTerm, period, rangeStartDay, rangeEndDay, ...filterData } =
+    filters;
+
+  const { rangeStart, rangeEnd } =
+    rangeStartDay && rangeEndDay
+      ? getCustomDateRange(rangeStartDay, rangeEndDay)
+      : getDateRangeByPeriod(normalizeCalendarPeriod(period));
+
   const calendarPeriod = normalizeCalendarPeriod(period);
-  const { rangeStart, rangeEnd } = getDateRangeByPeriod(calendarPeriod);
+
   const organizerRequestFilterData = {
     id: filterData.id,
     createdAt: filterData.createdAt,
@@ -742,6 +827,16 @@ const getBookingListCallenderForAdminAndSuperAdminClinic = async (
           scheduledAt: true,
           status: true,
           createdAt: true,
+          timeSlot: {
+            select: {
+              id: true,
+              date: true,
+              startTime: true,
+              endTime: true,
+              duration: true,
+              status: true,
+            },
+          },
           driver: { select: { id: true, fullName: true, email: true } },
           service: { select: { id: true, title: true } },
           clinic: { select: { id: true, fullName: true } },
@@ -764,13 +859,11 @@ const getBookingListCallenderForAdminAndSuperAdminClinic = async (
       organizerRequestTotal,
       page,
       limit,
-      period: calendarPeriod,
-      rangeStart,
-      rangeEnd,
+      period: period || calendarPeriod,
+      rangeStartDay: rangeStartDay || rangeStart,
+      rangeEndDay: rangeEndDay || rangeEnd,
     },
     data: {
-      // bookings,
-      // organizerRequests,
       events: [
         ...bookings.map(booking => ({
           type: 'booking' as const,
@@ -780,6 +873,17 @@ const getBookingListCallenderForAdminAndSuperAdminClinic = async (
           status: booking.status,
           clinicId: booking.clinicId,
           driverId: booking.driverId,
+          // booking has a real timeSlot with start/end time
+          timeSlot: booking.timeSlot
+            ? {
+                id: booking.timeSlot.id,
+                date: booking.timeSlot.date,
+                startTime: booking.timeSlot.startTime,
+                endTime: booking.timeSlot.endTime,
+                duration: booking.timeSlot.duration,
+                status: booking.timeSlot.status,
+              }
+            : null,
           payload: booking,
         })),
         ...organizerRequests.map(request => ({
@@ -790,6 +894,8 @@ const getBookingListCallenderForAdminAndSuperAdminClinic = async (
           status: request.status,
           clinicId: request.clinicId,
           organizerId: request.userId,
+          // organizerRequest has no timeSlot — always null
+          timeSlot: null,
           payload: request,
         })),
       ],

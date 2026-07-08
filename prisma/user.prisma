@@ -6,6 +6,7 @@ model User {
   phoneNumber            String?
   image                  String?
   password               String
+  dob                    String?
   //
   role                   UserRoleEnum             @default(USER)
   status                 UserStatus               @default(ACTIVE)

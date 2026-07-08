@@ -11,6 +11,9 @@ import { methodRoutes } from '../modules/paymethod/paymethod.route';
 import { medicalRecordRoutes } from '../modules/medicalRecord/medicalRecord.routes';
 import { organizerRequestRoutes } from '../modules/organizerRequest/organizerRequest.routes';
 import { analyticsRouter } from '../modules/analytics/analytics.route';
+import { privacyRouter } from '../modules/all/privacy.route';
+import { faqRouter } from '../modules/all/faq.route';
+import { termsRouter } from '../modules/all/terms.route';
 
 const router = express.Router();
 
@@ -66,6 +69,18 @@ const moduleRoutes = [
   {
     path: '/organizer-requests',
     route: organizerRequestRoutes,
+  },
+  {
+    path: '/faq',
+    route: faqRouter,
+  },
+  {
+    path: '/privacy',
+    route: privacyRouter,
+  },
+  {
+    path: '/terms',
+    route: termsRouter,
   },
 ];
 

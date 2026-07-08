@@ -4,6 +4,7 @@ model Service {
     title             String
     description       String?
     files             String?
+    // price             Float
     isDeleted         Boolean            @default(false)
     createdAt         DateTime           @default(now())
     updatedAt         DateTime           @updatedAt

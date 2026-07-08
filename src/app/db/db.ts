@@ -16,6 +16,14 @@ export const initiateSuperAdmin = async () => {
     isEmailVerified: true,
     status: UserStatus.ACTIVE,
   };
+  const adminPayload: any = {
+    fullName: 'Admin',
+    email: 'admin@gmail.com',
+    password: hashedPassword,
+    role: UserRoleEnum.ADMIN,
+    isEmailVerified: true,
+    status: UserStatus.ACTIVE,
+  };
 
   const isExistUser = await prisma.user.findUnique({
     where: {
@@ -27,5 +35,9 @@ export const initiateSuperAdmin = async () => {
 
   await prisma.user.create({
     data: payload,
+  });
+
+  await prisma.user.create({
+    data: adminPayload,
   });
 };

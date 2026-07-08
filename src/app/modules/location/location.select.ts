@@ -13,6 +13,7 @@ export const locationSelect = {
   locationName: true,
   lat: true,
   lng: true,
+  image: true,
   totalBookings: true,
   totalClinicsAdded: true,
   isDeleted: true,

@@ -60,7 +60,15 @@ const loginWithOtpFromDB = async (
     });
 
     const html = generateOtpEmail(otp);
-    emailSender(payload.email, html, 'OTP Verification');
+    try {
+      emailSender(payload.email, html, 'OTP Verification');
+    } catch (emailError) {
+      console.error('OTP Email sending failed:', emailError);
+      throw new AppError(
+        httpStatus.INTERNAL_SERVER_ERROR,
+        'Failed to send verification OTP email. Please try again.',
+      );
+    }
 
     return {
       message: 'Please check your email for the verification OTP.',
@@ -97,7 +105,7 @@ const loginWithOtpFromDB = async (
 
 // ======================== REGISTER WITH OTP ========================
 const registerWithOtpIntoDB = async (payload: User) => {
-  const { fullName, email, phoneNumber, password, companyLocation, role } =
+  const { fullName, email, phoneNumber, dob, password, companyLocation, role } =
     payload;
   const userRole = role ?? UserRoleEnum.USER;
 
@@ -129,6 +137,7 @@ const registerWithOtpIntoDB = async (payload: User) => {
       phoneNumber,
       password: hashedPassword,
       role: userRole,
+      dob,
       isAgreeWithTerms: true,
       ...(userRole === UserRoleEnum.ORGINIZER && { companyLocation }),
       otp,
@@ -252,7 +261,7 @@ const resendVerificationWithOtp = async (email: string) => {
     throw new AppError(
       httpStatus.INTERNAL_SERVER_ERROR,
       'Failed to send OTP email',
-    ); 
+    );
   }
 
   return {

@@ -403,6 +403,7 @@ const createClinicIntoDB = async (req: Request) => {
         clinicGmcNumber,
         locationId,
         isParking: isParking ?? false,
+        isEmailVerified: true,
         createdById,
       },
       select: {
