@@ -72,6 +72,11 @@ model User {
   organizerRequests      OrganizerRequest[]       @relation("OrganizerRequestServices")
   cliniOrganizerRequests OrganizerRequest[]       @relation("clinicsView")
   requestedDrivers       OrganizerRequestDriver[] @relation("RequestedDrivers")
+  //ticket model relations
+  createdTickets         SupportTicket[]          @relation("TicketCreatedBy")
+  assignedTickets        SupportTicket[]          @relation("TicketAssignedTo")
+  ticketMessages         TicketMessage[]          @relation("TicketMessageSender")
+  ticketStatusLogs       TicketStatusLog[]        @relation("TicketStatusChangedBy")
 
   @@map("users")
 }

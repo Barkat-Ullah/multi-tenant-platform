@@ -1,0 +1,117 @@
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING_CUSTOMER
+  RESOLVED
+  CLOSED
+  REOPENED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketCategory {
+  BOOKING_ISSUE
+  PAYMENT_ISSUE
+  MEDICAL_RECORD_ISSUE
+  ACCOUNT_ISSUE
+  CLINIC_ISSUE
+  TECHNICAL_ISSUE
+  OTHER
+}
+
+model TicketCounter {
+  id   String @id @default(auto()) @map("_id") @db.ObjectId
+  name String @unique
+  seq  Int    @default(0)
+}
+
+model SupportTicket {
+  id           String         @id @default(auto()) @map("_id") @db.ObjectId
+  ticketNumber String         @unique
+
+  subject      String
+  description  String
+  category     TicketCategory @default(OTHER)
+  priority     TicketPriority @default(MEDIUM)
+  status       TicketStatus   @default(OPEN)
+
+  createdById  String @db.ObjectId
+  createdBy    User   @relation("TicketCreatedBy", fields: [createdById], references: [id])
+
+  assignedToId String? @db.ObjectId
+  assignedTo   User?   @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
+
+  relatedBookingId String?  @db.ObjectId
+  relatedBooking   Booking? @relation(fields: [relatedBookingId], references: [id])
+
+  messages    TicketMessage[]
+  statusLogs  TicketStatusLog[]
+
+  satisfactionRating   Int?
+  satisfactionFeedback String?
+
+  firstResponseAt DateTime?
+  resolvedAt      DateTime?
+  closedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdById])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([category])
+  @@index([priority])
+  @@index([createdAt])
+  // Composite indexes for analytics queries
+  @@index([assignedToId, status])       // Top agents by resolved count
+  @@index([status, createdAt])          // Resolution time queries
+  @@index([satisfactionRating, createdAt]) // CSAT analytics
+}
+
+
+model TicketMessage {
+  id       String        @id @default(auto()) @map("_id") @db.ObjectId
+  ticketId String        @db.ObjectId
+  ticket   SupportTicket @relation(fields: [ticketId], references: [id])
+
+  senderId String @db.ObjectId
+  sender   User   @relation("TicketMessageSender", fields: [senderId], references: [id])
+
+  message        String
+  attachments    String[] @default([])
+  isInternalNote Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([ticketId, createdAt])  // For sorted message queries
+  @@index([senderId])             // For sender-based lookups
+}
+
+
+
+model TicketStatusLog {
+  id       String        @id @default(auto()) @map("_id") @db.ObjectId
+  ticketId String        @db.ObjectId
+  ticket   SupportTicket @relation(fields: [ticketId], references: [id])
+
+  fromStatus TicketStatus?
+  toStatus   TicketStatus
+
+  changedById String @db.ObjectId
+  changedBy   User   @relation("TicketStatusChangedBy", fields: [changedById], references: [id])
+
+  note String?
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([ticketId, createdAt])  // For sorted log queries
+  @@index([changedById])          // For admin audit queries
+}

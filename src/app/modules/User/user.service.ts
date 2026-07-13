@@ -91,6 +91,7 @@ const getAllUsersFromDB = async (
       image: true,
       status: true,
       role: true,
+      phoneNumber: true,
       createdAt: true,
     },
     orderBy: { createdAt: 'desc' },
@@ -109,6 +110,7 @@ const getAllUsersFromDB = async (
     image: user.image,
     status: user.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED',
     role: user.role,
+    phoneNumber: user.phoneNumber,
     joinDate: user.createdAt,
   }));
 
@@ -138,6 +140,7 @@ const getMyimageFromDB = async (id: string) => {
       city: true,
       address: true,
       image: true,
+      dob: true,
     },
   });
 
@@ -226,6 +229,7 @@ const getAllOrgDriverFromDB = async (
         email: true,
         image: true,
         status: true,
+        phoneNumber: true,
         medicalRecords: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -316,7 +320,7 @@ const getAllOrgDriverReportsFromDB = async (
         files: true,
         createdAt: true,
         driver: {
-          select: { id: true, fullName: true, image: true },
+          select: { id: true, fullName: true, image: true, phoneNumber: true },
         },
         clinic: {
           select: { id: true, fullName: true },

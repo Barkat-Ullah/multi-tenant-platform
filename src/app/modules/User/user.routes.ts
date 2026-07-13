@@ -40,52 +40,52 @@ router.get('/:id', authOptional(), UserControllers.getUserDetails);
 
 router.post(
   '/org-driver',
-  auth(UserRoleEnum.ADMIN,UserRoleEnum.ORGINIZER),
+  auth(UserRoleEnum.ADMIN,UserRoleEnum.ORGINIZER,UserRoleEnum.SUPERADMIN),
   UserControllers.createOrgDriver,
 );
 //clinic
 
 router.post(
   '/create-clinic',
-  auth(UserRoleEnum.ADMIN),
+  auth(UserRoleEnum.ADMIN,UserRoleEnum.SUPERADMIN),
   UserControllers.createClinic,
 );
 router.put(
   '/update-clinic/:id',
-  auth(UserRoleEnum.ADMIN),
+  auth(UserRoleEnum.ADMIN,UserRoleEnum.SUPERADMIN),
   UserControllers.updateClinic,
 );
 
 router.delete('/soft-delete/:id', auth('ANY'), UserControllers.softDeleteUser);
 router.delete(
   '/hard-delete/:id',
-  auth(UserRoleEnum.ADMIN),
+  auth(UserRoleEnum.ADMIN,UserRoleEnum.SUPERADMIN),
   UserControllers.hardDeleteUser,
 );
 
 router.put(
   '/user-role/:id',
-  auth(UserRoleEnum.ADMIN),
+  auth(UserRoleEnum.ADMIN,UserRoleEnum.SUPERADMIN),
   // validateRequest.body(userValidation.updateUserRoleSchema),
   UserControllers.updateUserRoleStatus,
 );
 
 router.put(
   '/user-status/:id',
-  auth(UserRoleEnum.ADMIN),
+  auth(UserRoleEnum.ADMIN,UserRoleEnum.SUPERADMIN),
   // validateRequest.body(userValidation.updateUserStatus),
   UserControllers.updateUserStatus,
 );
 router.put(
   '/approve-user',
-  auth(UserRoleEnum.ADMIN),
+  auth(UserRoleEnum.ADMIN,UserRoleEnum.SUPERADMIN),
   UserControllers.updateUserApproval,
 );
 
 router.put(
   '/update-user/:id',
   fileUploader.uploadSingle, // "image"
-  auth(UserRoleEnum.ADMIN),
+  auth(UserRoleEnum.ADMIN,UserRoleEnum.SUPERADMIN),
   // validateRequest.body(userValidation.updateUser),
   UserControllers.updateUser,
 );

@@ -61,7 +61,7 @@ const loginWithOtpFromDB = async (
 
     const html = generateOtpEmail(otp);
     try {
-      emailSender(payload.email, html, 'OTP Verification');
+      await emailSender(payload.email, html, 'OTP Verification');
     } catch (emailError) {
       console.error('OTP Email sending failed:', emailError);
       throw new AppError(
@@ -153,7 +153,7 @@ const registerWithOtpIntoDB = async (payload: User) => {
 
   try {
     const html = generateOtpEmail(otp);
-    emailSender(newUser.email, html, 'OTP Verification');
+    await emailSender(newUser.email, html, 'OTP Verification');
   } catch {
     throw new AppError(
       httpStatus.INTERNAL_SERVER_ERROR,
@@ -256,7 +256,7 @@ const resendVerificationWithOtp = async (email: string) => {
   });
 
   try {
-    emailSender(email, otp, 'OTP Verification');
+    await emailSender(email, otp, 'OTP Verification');
   } catch {
     throw new AppError(
       httpStatus.INTERNAL_SERVER_ERROR,

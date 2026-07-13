@@ -32,9 +32,9 @@ export const setupMiddlewares = (app: Application): void => {
   );
 
   // Body parsers
-  app.use(express.json({ limit: '50kb' }));
+  app.use(express.json({ limit: '500kb' }));
   app.use(cookieParser());
-  app.use(express.urlencoded({ limit: '50kb', extended: true }));
+  app.use(express.urlencoded({ limit: '500kb', extended: true }));
 };
 
 // Rate limiter

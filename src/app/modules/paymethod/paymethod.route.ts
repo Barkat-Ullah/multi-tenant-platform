@@ -3,7 +3,8 @@ import express from 'express';
 import catchAsync from '../../utils/catchAsync';
 import prisma from '../../utils/prisma';
 import ApiError from '../../errors/AppError';
-import { PayType } from '@prisma/client';
+import { PayType, UserRoleEnum } from '@prisma/client';
+import authOptional from '../../middlewares/authOptional';
 
 const router = express.Router();
 
@@ -34,12 +35,16 @@ export async function seedMethod() {
 
 router.get(
   '/',
-  auth(),
+  authOptional(),
   catchAsync(async (req, res) => {
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
+    const whereCondition =
+      userRole === UserRoleEnum.USER ? { isActive: true } : {};
+
     const result = await prisma.payMethod.findMany({
-      where: {
-        isActive: true,
-      },
+      where: whereCondition,
       select: {
         id: true,
         type: true,
@@ -57,7 +62,7 @@ router.get(
 
 router.get(
   '/:id',
-  auth(),
+  authOptional(),
   catchAsync(async (req, res) => {
     const result = await prisma.payMethod.findUnique({
       where: {

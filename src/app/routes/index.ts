@@ -14,6 +14,7 @@ import { analyticsRouter } from '../modules/analytics/analytics.route';
 import { privacyRouter } from '../modules/all/privacy.route';
 import { faqRouter } from '../modules/all/faq.route';
 import { termsRouter } from '../modules/all/terms.route';
+import { ticketRoutes } from '../modules/ticket/ticket.route';
 
 const router = express.Router();
 
@@ -81,6 +82,10 @@ const moduleRoutes = [
   {
     path: '/terms',
     route: termsRouter,
+  },
+  {
+    path: '/tickets',
+    route: ticketRoutes,
   },
 ];
 

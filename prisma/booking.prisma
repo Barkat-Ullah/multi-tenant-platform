@@ -63,6 +63,7 @@ model Booking {
     method        PayMethod?     @relation(fields: [paymethodId], references: [id])
     service       Service?       @relation(fields: [serviceId], references: [id])
     medicalRecord MedicalRecord?
+    tickets SupportTicket[]
 
     @@index([driverId])
     @@index([clinicId])
