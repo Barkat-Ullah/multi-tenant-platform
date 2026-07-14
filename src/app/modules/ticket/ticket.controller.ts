@@ -20,7 +20,7 @@ const ticketFilterableFields = [
 ];
 
 // ============================================================
-// CREATE TICKET
+// CREATE TICKET (supports file uploads via multipart/form-data)
 // ============================================================
 const createTicket = catchAsync(async (req: Request, res: Response) => {
   const result = await ticketService.createTicket(req);
@@ -88,7 +88,7 @@ const changeTicketStatus = catchAsync(async (req: Request, res: Response) => {
 });
 
 // ============================================================
-// CREATE MESSAGE
+// CREATE MESSAGE (supports file uploads via multipart/form-data)
 // ============================================================
 const createTicketMessage = catchAsync(async (req: Request, res: Response) => {
   const result = await ticketService.createTicketMessage(req);

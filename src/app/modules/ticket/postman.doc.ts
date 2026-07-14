@@ -22,6 +22,7 @@
  *      }
  *    - Response: Created ticket with ticketNumber (e.g., TKT-00001)
  *    - Note: Booking validation is atomic (inside transaction) to prevent race conditions
+ *    - Note: In-app notifications + emails sent to all admins on creation
  */
 
 /**
@@ -58,14 +59,15 @@
 
 /**
  * 4. PATCH /api/v1/tickets/:id/assign
- *    - Assign ticket to admin/staff
+ *    - Assign ticket to admin/staff (or self-assign)
  *    - Auth: ADMIN, SUPERADMIN only
- *    - Body:
+ *    - Body (optional — empty body = self-assign):
  *      {
- *        "assignedToId": "admin_user_id"
+ *        "assignedToId": "admin_user_id"  // optional — omit to assign to yourself
  *      }
  *    - Response: Updated ticket
  *    - Note: Assignee + ticket lookups are parallelized for 2x faster response
+ *    - Self-assign: If no assignedToId provided, the requesting admin is assigned
  */
 
 /**
@@ -158,6 +160,24 @@ curl -X GET "http://localhost:5000/api/v1/tickets?searchTerm=John&status=OPEN&pr
 /*
 curl -X GET "http://localhost:5000/api/v1/tickets/ticket_id?messagePage=1&messageLimit=50" \
   -H "Authorization: Bearer <token>"
+*/
+
+// Assign Ticket (to another admin)
+/*
+curl -X PATCH http://localhost:5000/api/v1/tickets/ticket_id/assign \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "assignedToId": "admin_user_id"
+  }'
+*/
+
+// Self-Assign Ticket (empty body = assign to yourself)
+/*
+curl -X PATCH http://localhost:5000/api/v1/tickets/ticket_id/assign \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
 */
 
 // Reply to Ticket

@@ -1329,6 +1329,231 @@ export const bookingCreatedAdminEmail = (
 </body>
 </html>`;
 
+// ============================================================
+// TICKET EMAIL TEMPLATES
+// ============================================================
+
+export const ticketCreatedUserEmail = (
+  userName: string,
+  ticketNumber: string,
+  subject: string,
+) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Support Ticket Created</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#0f6e56;padding:28px 36px;text-align:center;">
+              <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 10px;">
+                <tr>
+                  <td style="background-color:#1d9e75;border-radius:8px;width:36px;height:36px;text-align:center;vertical-align:middle;">
+                    <span style="font-size:18px;line-height:36px;">🎫</span>
+                  </td>
+                  <td style="padding-left:10px;vertical-align:middle;">
+                    <span style="font-size:17px;font-weight:600;color:#e1f5ee;">MediCheck</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0;font-size:12px;color:#9fe1cb;text-transform:uppercase;letter-spacing:1px;">Support Ticket Created</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px 36px;">
+
+              <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#0f172a;">Hi ${userName},</h1>
+              <p style="margin:0 0 24px;font-size:14px;color:#64748b;line-height:1.7;">
+                Your support ticket has been created successfully. Our team will review it shortly and get back to you.
+              </p>
+
+              <!-- Ticket Details Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:24px;">
+
+                <tr>
+                  <td colspan="2" style="background-color:#0f6e56;padding:12px 16px;">
+                    <p style="margin:0;font-size:11px;font-weight:700;color:#d1fae5;text-transform:uppercase;letter-spacing:1px;">Ticket Details</p>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;width:40%;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Ticket Number</p>
+                    <p style="margin:4px 0 0;font-size:14px;font-weight:700;color:#0f172a;font-family:'Courier New',monospace;">${ticketNumber}</p>
+                  </td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Status</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#d97706;">⏳ Open</p>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td colspan="2" style="padding:14px 16px;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Subject</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">${subject}</p>
+                  </td>
+                </tr>
+
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px;">
+                <tr>
+                  <td style="background-color:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 16px;">
+                    <table cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="font-size:16px;padding-right:10px;vertical-align:top;padding-top:1px;">💡</td>
+                        <td style="font-size:13px;color:#166534;line-height:1.6;">
+                          You can track the status of your ticket and reply to it from the app. We'll notify you when there's an update.
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <div style="height:1px;background-color:#e2e8f0;"></div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 36px;text-align:center;">
+              <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#475569;">MediCheck Support Team</p>
+              <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.6;">This is an automated message. Please do not reply to this email.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>`;
+
+export const ticketCreatedAdminEmail = (
+  adminName: string,
+  userName: string,
+  ticketNumber: string,
+  subject: string,
+) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>New Support Ticket – Admin Alert</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#0f172a;padding:28px 36px;text-align:center;">
+              <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto 10px;">
+                <tr>
+                  <td style="background-color:#1e293b;border-radius:8px;width:36px;height:36px;text-align:center;vertical-align:middle;">
+                    <span style="font-size:18px;line-height:36px;">🎫</span>
+                  </td>
+                  <td style="padding-left:10px;vertical-align:middle;">
+                    <span style="font-size:17px;font-weight:600;color:#f1f5f9;">MediCheck</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">New Support Ticket</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px 36px;">
+
+              <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#0f172a;">Hi ${adminName},</h1>
+              <p style="margin:0 0 24px;font-size:14px;color:#64748b;line-height:1.7;">
+                A new support ticket has been submitted by a user and is awaiting your attention.
+              </p>
+
+              <!-- Details Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:24px;">
+
+                <tr>
+                  <td colspan="2" style="background-color:#1e293b;padding:12px 16px;">
+                    <p style="margin:0;font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Ticket Details</p>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;width:40%;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Ticket Number</p>
+                    <p style="margin:4px 0 0;font-size:14px;font-weight:700;color:#0f172a;font-family:'Courier New',monospace;">${ticketNumber}</p>
+                  </td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Status</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#d97706;">⏳ Open</p>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Submitted By</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">👤 ${userName}</p>
+                  </td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #f1f5f9;border-left:1px solid #f1f5f9;">
+                    <p style="margin:0;font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.6px;">Subject</p>
+                    <p style="margin:4px 0 0;font-size:13px;font-weight:600;color:#0f172a;">${subject}</p>
+                  </td>
+                </tr>
+
+              </table>
+
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px;">
+                <tr>
+                  <td style="background-color:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px 16px;">
+                    <table cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td style="font-size:16px;padding-right:10px;vertical-align:top;">⚡</td>
+                        <td style="font-size:13px;color:#c2410c;line-height:1.6;">
+                          Action required: Log in to the admin panel to review and assign this ticket.
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <div style="height:1px;background-color:#e2e8f0;"></div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 36px;text-align:center;">
+              <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#475569;">MediCheck Platform</p>
+              <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.6;">Internal admin notification. Do not reply.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>`;
+
 const emailSender = async (to: string, html: string, subject: string) => {
   try {
     const transporter = nodemailer.createTransport({
@@ -1358,31 +1583,5 @@ const emailSender = async (to: string, html: string, subject: string) => {
     throw new Error('Failed to send email. Please try again later.');
   }
 };
-
-// const emailSender = async (to: string, html: string, subject: string) => {
-//   try {
-//     const transporter = nodemailer.createTransport({
-//       host: 'smtp-relay.brevo.com',
-//       port: 2525,
-//       secure: false,
-//       auth: {
-//         user: process.env.BREVO_MAIL!,
-//         pass: process.env.BREVO_MAIL_PASS!,
-//       },
-//     });
-//     const mailOptions = {
-//       from: '<akonhasan680@gmail.com>',
-//       to,
-//       subject,
-//       text: html.replace(/<[^>]+>/g, ''),
-//       html,
-//     };
-//     // Send the email
-//     const info = await transporter.sendMail(mailOptions);
-//     return info.messageId;
-//   } catch (error) {
-//     throw new Error('Failed to send email. Please try again later.');
-//   }
-// };
 
 export default emailSender;

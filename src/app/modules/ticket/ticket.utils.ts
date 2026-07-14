@@ -229,7 +229,7 @@ export const canSeeInternalNotes = (userRole: string): boolean => {
 
 // Generate ticket number (prefixed with zero-padded sequence)
 export const formatTicketNumber = (seq: number): string => {
-  return `TKT-${String(seq).padStart(5, '0')}`;
+  return `TKT-${String(seq).padStart(7, '0')}`;
 };
 
 // Calculate average resolution time in hours

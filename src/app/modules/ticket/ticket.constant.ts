@@ -1,5 +1,40 @@
 // Ticket status and priority constants for performance
 import { TicketStatus, TicketPriority, TicketCategory } from '@prisma/client';
+import { fileUploader } from '../../utils/fileUploader';
+import ApiError from '../../errors/AppError';
+import httpStatus from 'http-status';
+
+export const handleTicketAttachmentUploads = async (
+  files: { [fieldname: string]: Express.Multer.File[] } | undefined,
+): Promise<string[]> => {
+  const attachmentFiles = files?.attachments || [];
+
+  if (attachmentFiles.length === 0) return [];
+
+  try {
+    const uploadedUrls = await Promise.all(
+      attachmentFiles.map(async file => {
+        const ext = file.originalname.split('.').pop()?.toLowerCase();
+        let fileType: 'image' | 'video' | 'pdf' = 'pdf';
+        if (['jpg', 'jpeg', 'png', 'webp', 'heic'].includes(ext || ''))
+          fileType = 'image';
+        else if (['mp4', 'mov', 'avi', 'webm'].includes(ext || ''))
+          fileType = 'video';
+
+        const upload = await fileUploader.uploadToCloudinaryWithType(
+          file,
+          fileType,
+        );
+        return upload.Location;
+      }),
+    );
+
+    return uploadedUrls;
+  } catch (error: any) {
+    console.error('Cloudinary upload error:', error);
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Failed to upload file', error);
+  }
+};
 
 // Closed statuses for filtering - used in queries to avoid re-computation
 export const CLOSED_STATUSES: TicketStatus[] = [

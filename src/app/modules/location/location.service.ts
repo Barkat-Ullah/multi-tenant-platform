@@ -9,6 +9,27 @@ import { locationSelect } from './location.select';
 import { buildFilterConditions } from './location.utils';
 import { handleFileUploads } from '../../utils/handleFile';
 
+// Haversine distance in KM (consistent with existing location listing logic)
+const getDistanceFromLatLonInKm = (
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+) => {
+  const R = 6371; // Radius of the earth in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+
 // -------------------------------------------------------
 // create Location
 // -------------------------------------------------------
@@ -274,6 +295,84 @@ const getMyLocation = async (
 };
 
 // -------------------------------------------------------
+// get nearest Location for council
+// -------------------------------------------------------
+
+const councilNearestLocationServices = async (req: Request) => {
+  const { councilLat, councilLng } = req.query;
+
+  if (!councilLat || !councilLng) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'councilLat and councilLng are required');
+  }
+
+  const lat = parseFloat(councilLat as string);
+  const lng = parseFloat(councilLng as string);
+
+  if (isNaN(lat) || isNaN(lng)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'councilLat and councilLng must be valid numbers');
+  }
+
+  // 1. Get all non-deleted locations with their clinics
+  const locations = await prisma.location.findMany({
+    where: { isDeleted: false },
+    include: {
+      clinic: {
+        select: { id: true },
+      },
+    },
+  });
+
+  if (!locations.length) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'No locations found');
+  }
+
+  // 2. Find nearest location using Haversine
+  let nearestLocation = locations[0];
+  let minDistance = getDistanceFromLatLonInKm(lat, lng, locations[0].lat, locations[0].lng);
+
+  for (const location of locations) {
+    const distance = getDistanceFromLatLonInKm(lat, lng, location.lat, location.lng);
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearestLocation = location;
+    }
+  }
+
+  const clinicIds = nearestLocation.clinic.map((c) => c.id);
+
+  if (!clinicIds.length) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'No clinics found for the nearest location');
+  }
+
+  // 3. Get all services offered by these clinics via the junction model
+  const clinicServices = await prisma.clinicService.findMany({
+    where: {
+      clinicId: { in: clinicIds },
+    },
+    include: {
+      service: true,
+    },
+  });
+
+  // 4. Dedupe services (a service can be linked to multiple clinics in the same location)
+  const uniqueServicesMap = new Map();
+  for (const cs of clinicServices) {
+    if (cs.service && !cs.service.isDeleted) {
+      uniqueServicesMap.set(cs.service.id, cs.service);
+    }
+  }
+
+  const services = Array.from(uniqueServicesMap.values());
+
+  return {
+    location: nearestLocation,
+    distanceInKm: minDistance,
+    totalClinics: clinicIds.length,
+    services,
+  };
+};
+
+// -------------------------------------------------------
 // update Location
 // -------------------------------------------------------
 const updateLocation = async (req: Request) => {
@@ -347,6 +446,7 @@ export const locationService = {
   getLocationList,
   getLocationById,
   getMyLocation,
+  councilNearestLocationServices,
   updateLocation,
   toggleStatusLocation,
   softDeleteLocation,

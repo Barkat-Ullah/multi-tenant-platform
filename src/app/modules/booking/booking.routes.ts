@@ -55,6 +55,7 @@ router.put(
   bookingController.updateBooking,
 );
 
+
 // clinic confirms a pending booking
 router.patch(
   '/confirm/:id',

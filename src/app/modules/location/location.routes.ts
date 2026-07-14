@@ -24,6 +24,7 @@ router.post(
 
 router.get('/', authOptional(), locationController.getLocationList);
 
+router.get('/council-nearest', authOptional(), locationController.councilNearestLocationServices);
 router.get('/my', auth(), locationController.getMyLocation);
 
 router.get('/:id', authOptional(), locationController.getLocationById);

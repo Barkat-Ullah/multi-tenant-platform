@@ -62,6 +62,16 @@ const getMyLocation = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const councilNearestLocationServices = catchAsync(async (req: Request, res: Response) => {
+  const result = await locationService.councilNearestLocationServices(req);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Nearest location and its services retrieved successfully',
+    data: result,
+  });
+});
+
 // update Location
 const updateLocation = catchAsync(async (req: Request, res: Response) => {
   const result = await locationService.updateLocation(req);
@@ -118,4 +128,5 @@ export const locationController = {
   toggleStatusLocation,
   softDeleteLocation,
   deleteLocation,
+  councilNearestLocationServices,
 };

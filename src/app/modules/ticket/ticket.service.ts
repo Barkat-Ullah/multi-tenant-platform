@@ -31,8 +31,14 @@ import {
 import {
   CLOSED_STATUSES,
   CUSTOMER_ROLES,
+  handleTicketAttachmentUploads,
   STAFF_ROLES,
 } from './ticket.constant';
+import emailSender, {
+  ticketCreatedUserEmail,
+  ticketCreatedAdminEmail,
+} from '../../utils/sendMail';
+import { handleFileUploads } from '../../utils/handleFile';
 
 // Types for filters
 type ITicketFilterRequest = {
@@ -59,7 +65,7 @@ const createTicket = async (req: Request) => {
   const { subject, description, category, priority, relatedBookingId } =
     req.body;
 
-  // ATOMIC TRANSACTION: Validate booking + generate number + create ticket
+  // ATOMIC TRANSACTION: Validate booking + generate number + create ticket + notify admins
   const result = await prisma.$transaction(async tx => {
     // Validate related booking exists if provided (inside transaction to avoid races)
     if (relatedBookingId) {
@@ -115,10 +121,90 @@ const createTicket = async (req: Request) => {
       },
     });
 
-    return ticket;
+    // Get all admins for in-app notification
+    const admins = await tx.user.findMany({
+      where: {
+        role: { in: [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN] },
+        isDeleted: false,
+      },
+      select: { id: true },
+    });
+
+    // Create in-app notification for each admin
+    for (const admin of admins) {
+      await tx.notification.create({
+        data: {
+          receiverId: admin.id,
+          senderId: createdById,
+          title: 'New Support Ticket',
+          body: `Ticket ${ticketNumber}: ${subject.substring(0, 100)}`,
+          type: 'Message',
+          referenceId: ticket.id,
+        },
+      });
+    }
+
+    return { ticket, admins };
   });
 
-  return result;
+  // ============================================================
+  // SEND EMAILS (outside transaction to avoid blocking DB)
+  // ============================================================
+  const mailPromises: Promise<any>[] = [];
+
+  // Email to ticket creator
+  const creator = await prisma.user.findUnique({
+    where: { id: createdById },
+    select: { email: true, fullName: true },
+  });
+
+  if (creator?.email) {
+    mailPromises.push(
+      emailSender(
+        creator.email,
+        ticketCreatedUserEmail(
+          creator.fullName,
+          result.ticket.ticketNumber,
+          subject,
+        ),
+        `Support Ticket Created: ${result.ticket.ticketNumber}`,
+      ).catch(err => console.error('Ticket creator email failed:', err)),
+    );
+  }
+
+  // Email to each admin
+  const admins = result.admins?.length
+    ? await prisma.user.findMany({
+        where: {
+          id: { in: result.admins.map(a => a.id) },
+        },
+        select: { email: true, fullName: true },
+      })
+    : [];
+
+  const creatorName = creator?.fullName ?? 'A user';
+  for (const admin of admins) {
+    if (admin.email) {
+      mailPromises.push(
+        emailSender(
+          admin.email,
+          ticketCreatedAdminEmail(
+            admin.fullName,
+            creatorName,
+            result.ticket.ticketNumber,
+            subject,
+          ),
+          `New Support Ticket: ${result.ticket.ticketNumber}`,
+        ).catch(err => console.error('Admin ticket email failed:', err)),
+      );
+    }
+  }
+
+  if (mailPromises.length > 0) {
+    await Promise.all(mailPromises);
+  }
+
+  return result.ticket;
 };
 
 // ============================================================
@@ -135,7 +221,6 @@ const getTicketList = async (
 
   const andConditions: Prisma.SupportTicketWhereInput[] = [];
 
-  // Role-based scoping (use constant to avoid re-allocating array each call)
   const userRole = req.user.role;
   const userId = req.user.id;
 
@@ -220,17 +305,13 @@ const getTicketById = async (req: Request) => {
     prisma.ticketMessage.count({
       where: {
         ticketId: id,
-        ...(canSeeInternalNotes(userRole)
-          ? {}
-          : { isInternalNote: false }),
+        ...(canSeeInternalNotes(userRole) ? {} : { isInternalNote: false }),
       },
     }),
     prisma.ticketMessage.findMany({
       where: {
         ticketId: id,
-        ...(canSeeInternalNotes(userRole)
-          ? {}
-          : { isInternalNote: false }),
+        ...(canSeeInternalNotes(userRole) ? {} : { isInternalNote: false }),
       },
       select: ticketMessageCustomerSelect,
       orderBy: { createdAt: 'asc' as const },
@@ -276,10 +357,13 @@ const assignTicket = async (req: Request) => {
   const { assignedToId } = req.body;
   const userId = req.user.id;
 
+  // Self-assign if no assignedToId provided
+  const targetUserId = assignedToId || userId;
+
   // PARALLEL: Verify assignee exists + ticket exists simultaneously
   const [assignee, ticket] = await Promise.all([
     prisma.user.findUnique({
-      where: { id: assignedToId },
+      where: { id: targetUserId },
       select: { role: true, id: true },
     }),
     prisma.supportTicket.findUnique({
@@ -308,7 +392,7 @@ const assignTicket = async (req: Request) => {
     const updated = await tx.supportTicket.update({
       where: { id },
       data: {
-        assignedToId,
+        assignedToId: targetUserId,
         status: TicketStatus.IN_PROGRESS,
       },
       select: ticketSelect,
@@ -464,7 +548,14 @@ const getValidStatusTransitions = (
 // ============================================================
 const createTicketMessage = async (req: Request) => {
   const { id: ticketId } = req.params;
-  const { message, attachments, isInternalNote } = req.body;
+  const { message, isInternalNote } = req.body;
+
+  const files = req.files as
+    | { [fieldname: string]: Express.Multer.File[] }
+    | undefined;
+
+  const uploadedAttachments = await handleTicketAttachmentUploads(files);
+
   const senderId = req.user.id;
   const userRole = req.user.role;
 
@@ -506,7 +597,7 @@ const createTicketMessage = async (req: Request) => {
         ticketId,
         senderId,
         message,
-        attachments: attachments || [],
+        attachments: uploadedAttachments,
         isInternalNote: internalNote || false,
       },
       select: ticketMessageStaffSelect,
