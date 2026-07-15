@@ -1,23 +1,34 @@
 model OrganizerRequest {
-    id             String                   @id @default(auto()) @map("_id") @db.ObjectId
-    userId         String                   @db.ObjectId
-    serviceId      String                   @db.ObjectId
-    clinicId       String?                  @db.ObjectId
-    companyName    String
-    email          String
-    phone          String
-    location       String
-    totalDriver    String
-    status         Status                   @default(Pending)
-    isDeleted      Boolean                  @default(false)
-    createdAt      DateTime                 @default(now())
-    updatedAt      DateTime                 @updatedAt
+    id               String                   @id @default(auto()) @map("_id") @db.ObjectId
+    userId           String                   @db.ObjectId
+    clinicId         String?                  @db.ObjectId
+    serviceId        String                   @db.ObjectId
+    companyName      String
+    email            String
+    phone            String
+    location         String
+    totalDriver      String
+    //
+    siteContact      String?
+    siteContactPhone String?
+    siteAddress      String?
+    siteCity         String?
+    dataOfService    DateTime?
+    startTime        String?
+    isSizeRequired   Boolean                  @default(false)
+    isOnsiteParking  Boolean                  @default(false)
+    specialText      String?
+    //
+    status           Status                   @default(Pending)
+    isDeleted        Boolean                  @default(false)
+    createdAt        DateTime                 @default(now())
+    updatedAt        DateTime                 @updatedAt
     // relation
-    organizer      User                     @relation("OrganizerRequestServices", fields: [userId], references: [id])
-    clinic         User?                    @relation("clinicsView", fields: [clinicId], references: [id])
-    service        Service                  @relation(fields: [serviceId], references: [id])
-    drivers        OrganizerRequestDriver[]
-    medicalRecords MedicalRecord[]
+    organizer        User                     @relation("OrganizerRequestServices", fields: [userId], references: [id])
+    clinic           User?                    @relation("clinicsView", fields: [clinicId], references: [id])
+    service          Service                  @relation(fields: [serviceId], references: [id])
+    drivers          OrganizerRequestDriver[]
+    medicalRecords   MedicalRecord[]
 
     @@map("OrganizerRequest")
 }

@@ -30,7 +30,7 @@ router.put(
 router.patch(
   '/assign-clinic/:id',
   auth('ADMIN', 'SUPERADMIN'),
-  validateRequest(organizerRequestValidation.assignClinicAndStatusSchema),
+  // validateRequest(organizerRequestValidation.assignClinicAndStatusSchema),
   organizerRequestController.assignClinicAndStatus,
 );
 

@@ -341,9 +341,13 @@ const councilNearestLocationServices = async (req: Request) => {
   const clinicIds = nearestLocation.clinic.map((c) => c.id);
 
   if (!clinicIds.length) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'No clinics found for the nearest location');
+  return {
+    location: nearestLocation,
+    distanceInKm: minDistance,
+    totalClinics: 0,
+    services: [],
   }
-
+  }
   // 3. Get all services offered by these clinics via the junction model
   const clinicServices = await prisma.clinicService.findMany({
     where: {

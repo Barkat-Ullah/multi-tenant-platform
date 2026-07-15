@@ -41,7 +41,7 @@ router.get(
     const userRole = req.user?.role;
 
     const whereCondition =
-      userRole === UserRoleEnum.USER ? { isActive: true } : {};
+      userRole === UserRoleEnum.ADMIN || userRole === UserRoleEnum.SUPERADMIN ? {} : { isActive: true };
 
     const result = await prisma.payMethod.findMany({
       where: whereCondition,
