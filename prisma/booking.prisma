@@ -53,6 +53,7 @@ model Booking {
     timeSlotId    String?        @db.ObjectId
     scheduledAt   DateTime
     status        BookingStatus  @default(PENDING)
+    bookedBy      UserRoleEnum   @default(USER)
     createdAt     DateTime       @default(now())
     updatedAt     DateTime       @updatedAt
     //relation

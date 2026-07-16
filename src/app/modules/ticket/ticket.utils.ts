@@ -154,10 +154,6 @@ export const buildFilterConditions = (
     andConditions.push({ priority: filterData.priority });
   }
 
-  if (filterData.assignedToId) {
-    andConditions.push({ assignedToId: filterData.assignedToId });
-  }
-
   if (filterData.createdById) {
     andConditions.push({ createdById: filterData.createdById });
   }
@@ -213,7 +209,6 @@ export const buildSearchConditions = (
 // Optimized: uses const STAFF_ROLES from constant to avoid array re-allocation
 export const canAccessTicket = (
   ticketCreatedById: string,
-  ticketAssignedToId: string | null | undefined,
   userId: string,
   userRole: string,
 ) => {

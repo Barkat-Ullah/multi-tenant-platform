@@ -19,11 +19,6 @@ const updateSchema = z.object({
   status: z.nativeEnum(TicketStatus).optional(),
 });
 
-// Assign ticket validation - assignedToId is optional (defaults to self-assign)
-const assignSchema = z.object({
-  assignedToId: z.string().optional(),
-});
-
 // Status change validation
 const statusChangeSchema = z.object({
   status: z.nativeEnum(TicketStatus, { required_error: 'Status is required' }),
@@ -32,7 +27,7 @@ const statusChangeSchema = z.object({
 
 // Create message validation (attachments come from file uploads, not JSON body)
 const createMessageSchema = z.object({
-  message: z.string({ required_error: 'Message is required' }).min(1, 'Message cannot be empty'),
+  message: z.string({ required_error: 'Message is required' }).min(1, 'Message cannot be empty').optional(),
   isInternalNote: z
     .union([z.boolean(), z.string()])
     .optional()
@@ -51,7 +46,6 @@ const satisfactionSchema = z.object({
 export const ticketValidation = {
   createSchema,
   updateSchema,
-  assignSchema,
   statusChangeSchema,
   createMessageSchema,
   satisfactionSchema,

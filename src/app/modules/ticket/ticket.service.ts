@@ -46,7 +46,6 @@ type ITicketFilterRequest = {
   status?: TicketStatus;
   category?: TicketCategory;
   priority?: TicketPriority;
-  assignedToId?: string;
   createdById?: string;
   startDate?: string;
   endDate?: string;
@@ -328,7 +327,6 @@ const getTicketById = async (req: Request) => {
   if (
     !canAccessTicket(
       ticket.createdById || '',
-      ticket.assignedToId,
       userId,
       userRole,
     )
@@ -348,74 +346,7 @@ const getTicketById = async (req: Request) => {
   };
 };
 
-// ============================================================
-// ASSIGN TICKET - Admin only
-// Fix: Parallelize user lookup and ticket lookup (was sequential)
-// ============================================================
-const assignTicket = async (req: Request) => {
-  const { id } = req.params;
-  const { assignedToId } = req.body;
-  const userId = req.user.id;
 
-  // Self-assign if no assignedToId provided
-  const targetUserId = assignedToId || userId;
-
-  // PARALLEL: Verify assignee exists + ticket exists simultaneously
-  const [assignee, ticket] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: targetUserId },
-      select: { role: true, id: true },
-    }),
-    prisma.supportTicket.findUnique({
-      where: { id },
-      select: { assignedToId: true, status: true },
-    }),
-  ]);
-
-  if (!assignee) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Assignee not found');
-  }
-
-  if (!ticket) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Ticket not found');
-  }
-
-  if (!STAFF_ROLES.includes(assignee.role as (typeof STAFF_ROLES)[number])) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      'Can only assign to admin/staff',
-    );
-  }
-
-  // Update ticket and log status change in transaction
-  const result = await prisma.$transaction(async tx => {
-    const updated = await tx.supportTicket.update({
-      where: { id },
-      data: {
-        assignedToId: targetUserId,
-        status: TicketStatus.IN_PROGRESS,
-      },
-      select: ticketSelect,
-    });
-
-    // Log status change if status changed
-    if (ticket.status !== TicketStatus.IN_PROGRESS) {
-      await tx.ticketStatusLog.create({
-        data: {
-          ticketId: id,
-          fromStatus: ticket.status,
-          toStatus: TicketStatus.IN_PROGRESS,
-          changedById: userId,
-          note: 'Ticket assigned',
-        },
-      });
-    }
-
-    return updated;
-  });
-
-  return result;
-};
 
 // ============================================================
 // CHANGE TICKET STATUS - Transaction with logging
@@ -431,7 +362,6 @@ const changeTicketStatus = async (req: Request) => {
     select: {
       status: true,
       createdById: true,
-      assignedToId: true,
       resolvedAt: true,
       closedAt: true,
     },
@@ -550,6 +480,9 @@ const createTicketMessage = async (req: Request) => {
   const { id: ticketId } = req.params;
   const { message, isInternalNote } = req.body;
 
+  // Default message to empty string if not provided (allows attachment-only messages)
+  const messageText = message || '';
+
   const files = req.files as
     | { [fieldname: string]: Express.Multer.File[] }
     | undefined;
@@ -564,7 +497,6 @@ const createTicketMessage = async (req: Request) => {
     where: { id: ticketId },
     select: {
       createdById: true,
-      assignedToId: true,
       status: true,
     },
   });
@@ -582,7 +514,6 @@ const createTicketMessage = async (req: Request) => {
   if (
     !canAccessTicket(
       ticket.createdById || '',
-      ticket.assignedToId,
       senderId,
       userRole,
     )
@@ -596,7 +527,7 @@ const createTicketMessage = async (req: Request) => {
       data: {
         ticketId,
         senderId,
-        message,
+        message: messageText,
         attachments: uploadedAttachments,
         isInternalNote: internalNote || false,
       },
@@ -684,9 +615,6 @@ const addSatisfactionRating = async (req: Request) => {
 
 // ============================================================
 // GET ANALYTICS - Using database-side aggregation for performance
-// Fix: Use findMany with limited fields + in-memory calc for resolution time
-//      (Prisma _avg doesn't support Date fields, so we manually compute)
-// Fix: Agent names looked up with Map for O(1) access
 // ============================================================
 const getTicketAnalytics = async (req: Request) => {
   const { period, rangeStartDay, rangeEndDay } =
@@ -703,7 +631,6 @@ const getTicketAnalytics = async (req: Request) => {
     statusCounts,
     categoryCounts,
     priorityCounts,
-    assignedStats,
     resolutionTickets,
     csatStats,
   ] = await Promise.all([
@@ -724,18 +651,6 @@ const getTicketAnalytics = async (req: Request) => {
       by: ['priority'],
       where: dateFilter,
       _count: { _all: true },
-    }),
-    // Top agents by resolved tickets (uses composite index [assignedToId, status])
-    prisma.supportTicket.groupBy({
-      by: ['assignedToId'],
-      where: {
-        status: TicketStatus.RESOLVED,
-        assignedToId: { not: null },
-        ...dateFilter,
-      },
-      _count: { _all: true },
-      orderBy: { _count: { _all: 'desc' } as any },
-      take: 5,
     }),
     // Resolution time stats - limited fields, in-memory calc
     prisma.supportTicket.findMany({
@@ -769,25 +684,6 @@ const getTicketAnalytics = async (req: Request) => {
     );
   };
 
-  // Get agent names for top agents (parallelized)
-  const agentIds = assignedStats
-    .map((s: any) => s.assignedToId)
-    .filter(Boolean) as string[];
-  const agents = agentIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: agentIds } },
-        select: { id: true, fullName: true },
-      })
-    : [];
-
-  const agentsMap = new Map(agents.map(a => [a.id, a.fullName]));
-
-  const topAgents = assignedStats.map((stat: any) => ({
-    agentId: stat.assignedToId,
-    agentName: agentsMap.get(stat.assignedToId) || 'Unknown',
-    resolvedCount: stat._count._all,
-  }));
-
   // Calculate avg resolution time from fetched tickets
   const avgResolutionTime = calculateAvgResolutionHours(
     resolutionTickets as { createdAt: Date; resolvedAt: Date | null }[],
@@ -804,7 +700,6 @@ const getTicketAnalytics = async (req: Request) => {
     statusDistribution: formatDistribution(statusCounts, 'status'),
     categoryDistribution: formatDistribution(categoryCounts, 'category'),
     priorityDistribution: formatDistribution(priorityCounts, 'priority'),
-    topAgents,
     avgResolutionTimeHours: avgResolutionTime,
     avgCSAT,
   };
@@ -817,7 +712,6 @@ export const ticketService = {
   createTicket,
   getTicketList,
   getTicketById,
-  assignTicket,
   changeTicketStatus,
   createTicketMessage,
   addSatisfactionRating,

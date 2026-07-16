@@ -8,6 +8,7 @@ const createSchema = z.object({
   paymentType: z.nativeEnum(PayType, {
     required_error: 'paymentType is required (Stripe or Paypal)',
   }),
+  price: z.number({ required_error: 'price is required' }).positive(),
 });
 
 const updateSchema = z.object({

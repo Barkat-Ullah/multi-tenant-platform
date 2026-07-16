@@ -43,9 +43,6 @@ model SupportTicket {
   createdById  String @db.ObjectId
   createdBy    User   @relation("TicketCreatedBy", fields: [createdById], references: [id])
 
-  assignedToId String? @db.ObjectId
-  assignedTo   User?   @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
-
   relatedBookingId String?  @db.ObjectId
   relatedBooking   Booking? @relation(fields: [relatedBookingId], references: [id])
 
@@ -63,15 +60,12 @@ model SupportTicket {
   updatedAt DateTime @updatedAt
 
   @@index([createdById])
-  @@index([assignedToId])
   @@index([status])
   @@index([category])
   @@index([priority])
   @@index([createdAt])
-  // Composite indexes for analytics queries
-  @@index([assignedToId, status])       // Top agents by resolved count
-  @@index([status, createdAt])          // Resolution time queries
-  @@index([satisfactionRating, createdAt]) // CSAT analytics
+  @@index([status, createdAt])         
+  @@index([satisfactionRating, createdAt])
 }
 
 
@@ -83,18 +77,16 @@ model TicketMessage {
   senderId String @db.ObjectId
   sender   User   @relation("TicketMessageSender", fields: [senderId], references: [id])
 
-  message        String
+  message        String   @default("")
   attachments    String[] @default([])
   isInternalNote Boolean  @default(false)
 
   createdAt DateTime @default(now())
 
   @@index([ticketId])
-  @@index([ticketId, createdAt])  // For sorted message queries
-  @@index([senderId])             // For sender-based lookups
+  @@index([ticketId, createdAt]) 
+  @@index([senderId])             
 }
-
-
 
 model TicketStatusLog {
   id       String        @id @default(auto()) @map("_id") @db.ObjectId
@@ -112,6 +104,6 @@ model TicketStatusLog {
   createdAt DateTime @default(now())
 
   @@index([ticketId])
-  @@index([ticketId, createdAt])  // For sorted log queries
-  @@index([changedById])          // For admin audit queries
+  @@index([ticketId, createdAt]) 
+  @@index([changedById])        
 }

@@ -35,7 +35,6 @@
  *      - status (OPEN, IN_PROGRESS, PENDING_CUSTOMER, RESOLVED, CLOSED, REOPENED)
  *      - category (BOOKING_ISSUE, PAYMENT_ISSUE, etc.)
  *      - priority (LOW, MEDIUM, HIGH, URGENT)
- *      - assignedToId (filter by assigned admin)
  *      - createdById (filter by creator)
  *      - bookingId (filter by related booking)
  *      - period (daily, weekly, monthly) - date filter
@@ -58,20 +57,7 @@
  */
 
 /**
- * 4. PATCH /api/v1/tickets/:id/assign
- *    - Assign ticket to admin/staff (or self-assign)
- *    - Auth: ADMIN, SUPERADMIN only
- *    - Body (optional — empty body = self-assign):
- *      {
- *        "assignedToId": "admin_user_id"  // optional — omit to assign to yourself
- *      }
- *    - Response: Updated ticket
- *    - Note: Assignee + ticket lookups are parallelized for 2x faster response
- *    - Self-assign: If no assignedToId provided, the requesting admin is assigned
- */
-
-/**
- * 5. PATCH /api/v1/tickets/:id/status
+ * 4. PATCH /api/v1/tickets/:id/status
  *    - Update ticket status
  *    - Auth: ADMIN/SUPERADMIN (any status) or USER/ORGINIZER/CLINIC (reopen only)
  *    - Body:
@@ -89,7 +75,7 @@
  */
 
 /**
- * 6. POST /api/v1/tickets/:id/messages
+ * 5. POST /api/v1/tickets/:id/messages
  *    - Add reply to ticket
  *    - Auth: Ticket owner or ADMIN/SUPERADMIN
  *    - Body:
@@ -102,7 +88,7 @@
  */
 
 /**
- * 7. POST /api/v1/tickets/:id/rating
+ * 6. POST /api/v1/tickets/:id/rating
  *    - Add satisfaction rating (once only)
  *    - Auth: Ticket creator only, RESOLVED/CLOSED tickets only
  *    - Body:
@@ -113,7 +99,7 @@
  */
 
 /**
- * 8. GET /api/v1/tickets/analytics
+ * 7. GET /api/v1/tickets/analytics
  *    - Get ticket analytics dashboard
  *    - Auth: ADMIN, SUPERADMIN only
  *    - Query params:
@@ -126,7 +112,6 @@
  *        "statusDistribution": { "OPEN": 10, "IN_PROGRESS": 5, ... },
  *        "categoryDistribution": { "BOOKING_ISSUE": 8, ... },
  *        "priorityDistribution": { "HIGH": 3, ... },
- *        "topAgents": [{ "agentId": "...", "agentName": "...", "resolvedCount": 5 }],
  *        "avgResolutionTimeHours": 24.5,
  *        "avgCSAT": 4.2
  *      }
@@ -160,24 +145,6 @@ curl -X GET "http://localhost:5000/api/v1/tickets?searchTerm=John&status=OPEN&pr
 /*
 curl -X GET "http://localhost:5000/api/v1/tickets/ticket_id?messagePage=1&messageLimit=50" \
   -H "Authorization: Bearer <token>"
-*/
-
-// Assign Ticket (to another admin)
-/*
-curl -X PATCH http://localhost:5000/api/v1/tickets/ticket_id/assign \
-  -H "Authorization: Bearer <admin_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "assignedToId": "admin_user_id"
-  }'
-*/
-
-// Self-Assign Ticket (empty body = assign to yourself)
-/*
-curl -X PATCH http://localhost:5000/api/v1/tickets/ticket_id/assign \
-  -H "Authorization: Bearer <admin_token>" \
-  -H "Content-Type: application/json" \
-  -d '{}'
 */
 
 // Reply to Ticket

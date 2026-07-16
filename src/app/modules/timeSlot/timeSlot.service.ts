@@ -2,7 +2,7 @@ import { Request } from 'express';
 import prisma from '../../utils/prisma';
 import ApiError from '../../errors/AppError';
 import httpStatus from 'http-status';
-import { SlotStatus } from '@prisma/client';
+import { SlotStatus, UserRoleEnum } from '@prisma/client';
 import { availabilitySelect, timeSlotSelect } from './timeSlot.select';
 
 // -------------------------------------------------------
@@ -69,8 +69,27 @@ const generateSlots = (
 // create availability + auto-generate 30min slots
 // -------------------------------------------------------
 const createAvailabilityWithSlots = async (req: Request) => {
-  const clinicId = req.user.id;
-  const { slotDate, startTime, endTime, capacity } = req.body;
+  const userRole = req.user.role;
+  const {
+    slotDate,
+    startTime,
+    endTime,
+    capacity,
+    clinicId: bodyClinicId,
+  } = req.body;
+
+  // Admin/SuperAdmin must provide a clinicId; otherwise use the authenticated clinic's id
+  const isAdmin = [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN].includes(
+    userRole,
+  );
+  const clinicId = isAdmin ? bodyClinicId : req.user.id;
+
+  if (isAdmin && !bodyClinicId) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'clinicId is required when admin creates availability',
+    );
+  }
 
   // validate time
   const [sh, sm] = startTime.split(':').map(Number);
@@ -373,7 +392,12 @@ const addSingleSlot = async (req: Request) => {
 // -------------------------------------------------------
 const toggleSlotStatus = async (req: Request) => {
   const { id } = req.params;
-  const clinicId = req.user.id;
+  const userRole = req.user.role;
+  const userId = req.user.id;
+
+  const isAdmin = [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN].includes(
+    userRole,
+  );
 
   const slot = await prisma.timeSlot.findUnique({
     where: { id },
@@ -386,7 +410,8 @@ const toggleSlotStatus = async (req: Request) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Slot not found');
   }
 
-  if (slot.clinicAvailable.clinicId !== clinicId) {
+  // Admin/SuperAdmin can toggle any slot; clinic can only toggle their own
+  if (!isAdmin && slot.clinicAvailable.clinicId !== userId) {
     throw new ApiError(
       httpStatus.FORBIDDEN,
       'This slot does not belong to you',
@@ -487,6 +512,63 @@ const updateOffDays = async (req: Request) => {
   return updated;
 };
 
+// -------------------------------------------------------
+// toggle availability active/inactive for a specific date (clinic/admin/superadmin)
+// -------------------------------------------------------
+const toggleAvailabilityDateStatus = async (req: Request) => {
+  const userRole = req.user.role;
+  const { date } = req.body;
+  const { clinicId: bodyClinicId } = req.body;
+
+  // Admin/SuperAdmin must provide a clinicId; clinic uses their own id
+  const isAdmin = [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN].includes(
+    userRole,
+  );
+  const clinicId = isAdmin ? bodyClinicId : req.user.id;
+
+  if (isAdmin && !bodyClinicId) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'clinicId is required when admin toggles availability',
+    );
+  }
+
+  if (!date) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'date is required',
+    );
+  }
+
+  const dateObj = new Date(date);
+
+  const availability = await prisma.clinicAvailability.findUnique({
+    where: { clinicId_slotDate: { clinicId, slotDate: dateObj } },
+  });
+
+  if (!availability) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'No availability found for this date');
+  }
+
+  const updated = await prisma.clinicAvailability.update({
+    where: { clinicId_slotDate: { clinicId, slotDate: dateObj } },
+    data: { isActive: !availability.isActive },
+    select: {
+      id: true,
+      slotDate: true,
+      isActive: true,
+      clinicId: true,
+    },
+  });
+
+  return {
+    id: updated.id,
+    date: updated.slotDate.toISOString().split('T')[0],
+    isActive: updated.isActive,
+    clinicId: updated.clinicId,
+  };
+};
+
 export const clinicAvailabilityService = {
   createAvailabilityWithSlots,
   getAvailabilityByMonth,
@@ -496,4 +578,5 @@ export const clinicAvailabilityService = {
   getMyAvailability,
   deleteAvailability,
   updateOffDays,
+  toggleAvailabilityDateStatus,
 };

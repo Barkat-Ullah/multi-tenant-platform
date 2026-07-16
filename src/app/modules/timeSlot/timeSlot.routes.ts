@@ -9,10 +9,10 @@ import authOptional from '../../middlewares/authOptional';
 
 const router = express.Router();
 
-// clinic creates availability + auto-generates 30min slots
+// clinic creates availability + auto-generates 30min slots (admin can create on behalf of clinic)
 router.post(
   '/',
-  auth(),
+  auth(UserRoleEnum.CLINIC, UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN),
   validateRequest(clinicAvailabilityValidation.createAvailabilitySchema),
   clinicAvailabilityController.createAvailabilityWithSlots,
 );
@@ -45,14 +45,19 @@ router.patch(
   clinicAvailabilityController.updateOffDays,
 );
 
-// clinic toggles a slot active/inactive
+// clinic/admin/superadmin toggles a slot active/inactive
 router.patch(
   '/slot/toggle/:id',
-  auth(),
+  auth(UserRoleEnum.CLINIC, UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN),
   clinicAvailabilityController.toggleSlotStatus,
 );
 
-
+// clinic/admin/superadmin toggles a full date availability active/inactive
+router.patch(
+  '/toggle-date',
+  auth(UserRoleEnum.CLINIC, UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN),
+  clinicAvailabilityController.toggleAvailabilityDateStatus,
+);
 
 // clinic deletes full availability + all its slots
 router.delete('/:id', auth(), clinicAvailabilityController.deleteAvailability);

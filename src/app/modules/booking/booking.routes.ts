@@ -7,10 +7,10 @@ import { UserRoleEnum } from '@prisma/client';
 
 const router = express.Router();
 
-// driver creates a booking
+// driver creates a booking; ADMIN/SUPER_ADMIN can create on behalf of a client
 router.post(
   '/',
-  auth(UserRoleEnum.USER),
+  auth(UserRoleEnum.USER, UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN),
   validateRequest(bookingValidation.createSchema),
   bookingController.createBooking,
 );

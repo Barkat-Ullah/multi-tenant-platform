@@ -192,6 +192,30 @@ const updateMyimage = catchAsync(async (req, res) => {
   });
 });
 
+const updateClientInfo = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const payload = req.body;
+  const result = await UserServices.updateClientInfoIntoDB(id, payload);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Client info updated successfully!',
+    data: result,
+  });
+});
+
+const sendManualEmail = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { subject, message } = req.body;
+  const result = await UserServices.sendManualEmailIntoDB(id, subject, message);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Email sent successfully',
+    data: result,
+  });
+});
+
 export const UserControllers = {
   getAllUsers,
   getMyimage,
@@ -210,5 +234,8 @@ export const UserControllers = {
   //org
   createOrgDriver,
   getAllOrgDriver,
-  getAllOrgDriverReports
+  getAllOrgDriverReports,
+  //admin
+  updateClientInfo,
+  sendManualEmail,
 };

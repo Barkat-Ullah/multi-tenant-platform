@@ -16,6 +16,12 @@ const createAvailabilitySchema = z.object({
     .optional()
     .default([]),
   capacity: z.number().int().min(1).optional().default(1),
+  clinicId: z.string().optional(),
+});
+
+const toggleAvailabilityDateSchema = z.object({
+  date: z.coerce.date({ required_error: 'date is required' }),
+  clinicId: z.string().optional(),
 });
 
 const addSingleSlotSchema = z.object({
@@ -31,4 +37,5 @@ const addSingleSlotSchema = z.object({
 export const clinicAvailabilityValidation = {
   createAvailabilitySchema,
   addSingleSlotSchema,
+  toggleAvailabilityDateSchema,
 };

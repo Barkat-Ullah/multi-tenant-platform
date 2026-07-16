@@ -10,6 +10,7 @@ export const bookingSelect = {
   scheduledAt: true,
   status: true,
   createdAt: true,
+  bookedBy: true,
   driver: {
     select: {
       id: true,

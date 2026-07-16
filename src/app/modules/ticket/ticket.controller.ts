@@ -11,7 +11,6 @@ const ticketFilterableFields = [
   'status',
   'category',
   'priority',
-  'assignedToId',
   'createdById',
   'period',
   'rangeStartDay',
@@ -61,18 +60,7 @@ const getTicketById = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-// ============================================================
-// ASSIGN TICKET
-// ============================================================
-const assignTicket = catchAsync(async (req: Request, res: Response) => {
-  const result = await ticketService.assignTicket(req);
-  sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: 'Ticket assigned successfully',
-    data: result,
-  });
-});
+
 
 // ============================================================
 // CHANGE TICKET STATUS
@@ -133,7 +121,6 @@ export const ticketController = {
   createTicket,
   getTicketList,
   getTicketById,
-  assignTicket,
   changeTicketStatus,
   createTicketMessage,
   addSatisfactionRating,

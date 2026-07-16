@@ -7,7 +7,14 @@ import httpStatus from 'http-status';
 export const handleTicketAttachmentUploads = async (
   files: { [fieldname: string]: Express.Multer.File[] } | undefined,
 ): Promise<string[]> => {
-  const attachmentFiles = files?.attachments || [];
+  // Collect files from all accepted field names
+  const attachmentFiles = [
+    ...(files?.files || []),
+    ...(files?.image || []),
+    ...(files?.video || []),
+    ...(files?.pdf || []),
+    ...(files?.attachments || []),
+  ];
 
   if (attachmentFiles.length === 0) return [];
 

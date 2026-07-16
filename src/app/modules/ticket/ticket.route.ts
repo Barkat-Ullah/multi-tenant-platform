@@ -44,6 +44,13 @@ router.get(
   ticketController.getTicketList,
 );
 
+// GET    /tickets/analytics          - admin dashboard (MUST be before /:id)
+router.get(
+  '/analytics',
+  auth(UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN),
+  ticketController.getTicketAnalytics,
+);
+
 // GET    /tickets/:id                - detail + messages
 router.get(
   '/:id',
@@ -55,14 +62,6 @@ router.get(
     UserRoleEnum.SUPERADMIN,
   ),
   ticketController.getTicketById,
-);
-
-// PATCH  /tickets/:id/assign         - admin only
-router.patch(
-  '/:id/assign',
-  auth(UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN),
-  validateRequest(ticketValidation.assignSchema),
-  ticketController.assignTicket,
 );
 
 // PATCH  /tickets/:id/status         - admin or user (to reopen)
@@ -100,13 +99,6 @@ router.post(
   auth(UserRoleEnum.USER, UserRoleEnum.ORGINIZER, UserRoleEnum.CLINIC),
   validateRequest(ticketValidation.satisfactionSchema),
   ticketController.addSatisfactionRating,
-);
-
-// GET    /tickets/analytics          - admin dashboard
-router.get(
-  '/analytics',
-  auth(UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN),
-  ticketController.getTicketAnalytics,
 );
 
 export const ticketRoutes = router;

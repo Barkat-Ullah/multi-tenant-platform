@@ -89,6 +89,19 @@ const updateOffDays = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const toggleAvailabilityDateStatus = catchAsync(
+  async (req: Request, res: Response) => {
+    const result =
+      await clinicAvailabilityService.toggleAvailabilityDateStatus(req);
+    sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: 'Availability date status toggled successfully',
+      data: result,
+    });
+  },
+);
+
 export const clinicAvailabilityController = {
   createAvailabilityWithSlots,
   getAvailabilityByMonth,
@@ -98,4 +111,5 @@ export const clinicAvailabilityController = {
   getMyAvailability,
   deleteAvailability,
   updateOffDays,
+  toggleAvailabilityDateStatus,
 };

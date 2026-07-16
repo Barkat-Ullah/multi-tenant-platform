@@ -83,11 +83,7 @@ export const ticketSelect = {
   satisfactionRating: true,
   satisfactionFeedback: true,
   createdById: true,
-  assignedToId: true,
   createdBy: {
-    select: userMiniSelect,
-  },
-  assignedTo: {
     select: userMiniSelect,
   },
   relatedBooking: {
@@ -119,9 +115,6 @@ export const ticketListItemSelect = {
   createdBy: {
     select: userMiniSelect,
   },
-  assignedTo: {
-    select: userMiniSelect,
-  },
   // Last message preview for listing
   messages: {
     take: 1,
@@ -147,10 +140,4 @@ export const ticketAnalyticsSelect = {
   createdAt: true,
   resolvedAt: true,
   closedAt: true,
-  assignedTo: {
-    select: {
-      id: true,
-      fullName: true,
-    },
-  },
 } satisfies Prisma.SupportTicketSelect;

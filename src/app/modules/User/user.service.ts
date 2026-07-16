@@ -939,6 +939,128 @@ const updateMyimageIntoDB = async (
   return result;
 };
 
+// -------------------------------------------------------
+// Admin/SuperAdmin: Update client basic profile fields
+// -------------------------------------------------------
+const updateClientInfoIntoDB = async (
+  clientId: string,
+  payload: {
+    fullName?: string;
+    phoneNumber?: string;
+    describe?: string;
+    city?: string;
+    address?: string;
+    image?: string;
+  },
+) => {
+  const userInfo = await prisma.user.findUnique({
+    where: { id: clientId },
+  });
+
+  if (!userInfo) {
+    throw new AppError(
+      httpStatus.NOT_FOUND,
+      'User not found with id: ' + clientId,
+    );
+  }
+
+  const result = await prisma.user.update({
+    where: { id: clientId },
+    data: {
+      ...(payload.fullName !== undefined && { fullName: payload.fullName }),
+      ...(payload.phoneNumber !== undefined && {
+        phoneNumber: payload.phoneNumber,
+      }),
+      ...(payload.describe !== undefined && { describe: payload.describe }),
+      ...(payload.city !== undefined && { city: payload.city }),
+      ...(payload.address !== undefined && { address: payload.address }),
+      ...(payload.image !== undefined && { image: payload.image }),
+    },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      image: true,
+      role: true,
+      describe: true,
+      city: true,
+      address: true,
+      phoneNumber: true,
+      status: true,
+    },
+  });
+
+  if (!result) {
+    throw new AppError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      'Failed to update user info',
+    );
+  }
+
+  return result;
+};
+
+// -------------------------------------------------------
+// Admin/SuperAdmin: Send manual email to a client
+// -------------------------------------------------------
+const sendManualEmailIntoDB = async (
+  clientId: string,
+  subject: string,
+  message: string,
+) => {
+  const user = await prisma.user.findUnique({
+    where: { id: clientId },
+    select: { email: true, fullName: true },
+  });
+
+  if (!user) {
+    throw new AppError(
+      httpStatus.NOT_FOUND,
+      'User not found with id: ' + clientId,
+    );
+  }
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>${subject}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6f8;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+          <tr>
+            <td style="background-color:#0f172a;padding:28px 36px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;">Admin Message</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px 36px;">
+              <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#0f172a;">Hi ${user.fullName},</h1>
+              <p style="margin:0 0 24px;font-size:14px;color:#64748b;line-height:1.7;">${message}</p>
+              <div style="height:1px;background-color:#e2e8f0;"></div>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 36px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;">This is an automated message from the platform. Please do not reply.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  await emailSender(user.email, html, subject);
+
+  return { message: 'Email sent successfully', email: user.email };
+};
+
 export const UserServices = {
   getAllUsersFromDB,
   getMyimageFromDB,
@@ -958,4 +1080,7 @@ export const UserServices = {
   createOrgDriverIntoDB,
   getAllOrgDriverFromDB,
   getAllOrgDriverReportsFromDB,
+  //admin
+  updateClientInfoIntoDB,
+  sendManualEmailIntoDB,
 };

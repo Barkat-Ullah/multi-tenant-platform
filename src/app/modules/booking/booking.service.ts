@@ -221,17 +221,26 @@ const bookingSearchAbleFields = [
 // CREATE BOOKING
 // -------------------------------------------------------
 const createBooking = async (req: Request) => {
-  const driverId = req.user.id;
   const userRole = req.user.role;
   const { serviceId, clinicId, timeSlotId, scheduledAt, paymentType, price } =
     req.body;
 
-  if (userRole !== UserRoleEnum.USER) {
+  const adminId = req.user.id;
+
+  // Allow ADMIN/SUPER_ADMIN to book on behalf of a client
+  const isAdmin = [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN].includes(
+    userRole,
+  );
+
+  if (userRole !== UserRoleEnum.USER && !isAdmin) {
     throw new ApiError(
       httpStatus.FORBIDDEN,
-      'Only drivers can create bookings at this time',
+      'Only drivers and admins can create bookings',
     );
   }
+
+  // When admin books, they must provide a clientId; otherwise use the authenticated user
+  const driverId = isAdmin ? adminId : req.user.id;
 
   const admins = await getAdminAndSuperAdminEmails();
 
@@ -239,6 +248,10 @@ const createBooking = async (req: Request) => {
     where: { id: driverId },
     select: { email: true, fullName: true },
   });
+
+  if (!driver) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Client not found');
+  }
 
   const clinic = await prisma.user.findFirst({
     where: { id: clinicId, role: UserRoleEnum.CLINIC, isDeleted: false },
@@ -329,6 +342,7 @@ const createBooking = async (req: Request) => {
           scheduledAt: new Date(scheduledAt),
           status: BookingStatus.PENDING,
           paymethodId: payMethod!.id,
+          bookedBy: userRole,
         },
         select: bookingSelect,
       });
@@ -1160,12 +1174,13 @@ const cancelBooking = async (req: Request) => {
 };
 
 // -------------------------------------------------------
-// reschedule Booking — driver only
+// reschedule Booking — driver, clinic, admin
 // -------------------------------------------------------
 const rescheduleBooking = async (req: Request) => {
   const { id } = req.params;
   const { newTimeSlotId, newScheduledAt } = req.body;
-  const driverId = req.user.id;
+  const userId = req.user.id;
+  const userRole = req.user.role;
 
   const booking = await prisma.booking.findUnique({
     where: { id },
@@ -1176,7 +1191,14 @@ const rescheduleBooking = async (req: Request) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
   }
 
-  if (booking.driverId !== driverId) {
+  const isAdmin = [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN].includes(
+    userRole,
+  );
+  const isOwner = booking.driverId === userId;
+  const isClinic = booking.clinicId === userId;
+
+  // Admin/SuperAdmin can reschedule any booking; otherwise only the owner driver or clinic
+  if (!isAdmin && !isOwner && !isClinic) {
     throw new ApiError(
       httpStatus.FORBIDDEN,
       'You can only reschedule your own booking',
@@ -1271,7 +1293,7 @@ const rescheduleBooking = async (req: Request) => {
     // audit
     await tx.auditLog.create({
       data: {
-        actorId: driverId,
+        actorId: userId,
         action: 'BOOKING_RESCHEDULED' as any,
         targetModel: 'Booking',
         targetId: id,
@@ -1286,7 +1308,7 @@ const rescheduleBooking = async (req: Request) => {
     // notify driver
     await tx.notification.create({
       data: {
-        receiverId: driverId,
+        receiverId: booking.driverId,
         title: 'Booking Rescheduled',
         body: `Your booking has been rescheduled to ${new Date(newScheduledAt).toDateString()}. Waiting for clinic confirmation.`,
         type: 'BookingCreated',
@@ -1298,7 +1320,7 @@ const rescheduleBooking = async (req: Request) => {
     await tx.notification.create({
       data: {
         receiverId: booking.clinicId,
-        senderId: driverId,
+        senderId: userId,
         title: 'Booking Rescheduled',
         body: `A driver has rescheduled their booking to ${new Date(newScheduledAt).toDateString()}.`,
         type: 'BookingCreated',
