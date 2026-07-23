@@ -34,12 +34,11 @@ import {
   handleTicketAttachmentUploads,
   STAFF_ROLES,
 } from './ticket.constant';
-import emailSender, {
+import {
   ticketCreatedUserEmail,
   ticketCreatedAdminEmail,
 } from '../../utils/sendMail';
 import { mailQueue } from '../../helpers/queue';
-import { handleFileUploads } from '../../utils/handleFile';
 import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
 
 // Types for filters
@@ -319,38 +318,48 @@ const getTicketById = async (req: Request) => {
   );
   const messageSkip = (messagePage - 1) * messageLimit;
 
-  // Fetch ticket detail (without messages) + paginated messages in parallel
+  // Fetch ticket detail first — skip message queries if ticket missing
   const cacheKey = await CacheKeys.single('supportTicket', id);
-  const [ticketData, totalMessages, messages] = await Promise.all([
-    cacheOr(cacheKey, TTL.MEDIUM, () =>
-      prisma.supportTicket.findUnique({ where: { id }, select: ticketSelect }),
-    ),
-    prisma.ticketMessage.count({
-      where: {
-        ticketId: id,
-        ...(canSeeInternalNotes(userRole) ? {} : { isInternalNote: false }),
-      },
-    }),
-    prisma.ticketMessage.findMany({
-      where: {
-        ticketId: id,
-        ...(canSeeInternalNotes(userRole) ? {} : { isInternalNote: false }),
-      },
-      select: ticketMessageCustomerSelect,
-      orderBy: { createdAt: 'asc' as const },
-      skip: messageSkip,
-      take: messageLimit,
-    }),
-  ]);
+  const ticketData = await cacheOr(cacheKey, TTL.MEDIUM, () =>
+    prisma.supportTicket.findUnique({ where: { id }, select: ticketSelect }),
+  );
 
   if (!ticketData) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Ticket not found');
   }
 
-  // Access control
+  // Access control (must check before caching messages for this user)
   if (!canAccessTicket(ticketData.createdById || '', userId, userRole)) {
     throw new ApiError(httpStatus.FORBIDDEN, 'You cannot access this ticket');
   }
+
+  // Cache messages per ticket + pagination + role (staff sees internal notes, customer doesn't)
+  const messageWhere = {
+    ticketId: id,
+    ...(canSeeInternalNotes(userRole) ? {} : { isInternalNote: false }),
+  };
+  const messageCacheKey = await CacheKeys.list('ticketMessage', {
+    ticketId: id,
+    page: messagePage,
+    limit: messageLimit,
+    userRole,
+  });
+  const cachedMessages = await cacheOr(messageCacheKey, TTL.SHORT, async () => {
+    const [count, msgs] = await Promise.all([
+      prisma.ticketMessage.count({ where: messageWhere }),
+      prisma.ticketMessage.findMany({
+        where: messageWhere,
+        select: ticketMessageCustomerSelect,
+        orderBy: { createdAt: 'asc' as const },
+        skip: messageSkip,
+        take: messageLimit,
+      }),
+    ]);
+    return { total: count, messages: msgs };
+  });
+
+  const totalMessages = cachedMessages?.total ?? 0;
+  const messages = cachedMessages?.messages ?? [];
 
   return {
     ...ticketData,
@@ -572,7 +581,10 @@ const createTicketMessage = async (req: Request) => {
   });
 
   // Invalidate ticket cache (message added, possibly status changed)
-  await CacheInvalidator.onRecordUpdate('supportTicket', ticketId);
+  await Promise.all([
+    CacheInvalidator.onRecordUpdate('supportTicket', ticketId),
+    CacheInvalidator.onRecordCreate('ticketMessage'),
+  ]);
 
   return result;
 };
@@ -640,84 +652,103 @@ const getTicketAnalytics = async (req: Request) => {
       ? getCustomDateRange(rangeStartDay, rangeEndDay)
       : getDateRangeByPeriod(normalizeCalendarPeriod(period));
 
-  const dateFilter = { createdAt: { gte: rangeStart, lte: rangeEnd } };
+  const cacheKey = await CacheKeys.list('supportTicket', {
+    analytics: true,
+    period: period || 'weekly',
+    rangeStartDay: rangeStartDay || '',
+    rangeEndDay: rangeEndDay || '',
+  });
 
-  // Parallel queries for all analytics
-  const [
-    statusCounts,
-    categoryCounts,
-    priorityCounts,
-    resolutionTickets,
-    csatStats,
-  ] = await Promise.all([
-    // Status distribution
-    prisma.supportTicket.groupBy({
-      by: ['status'],
-      where: dateFilter,
-      _count: { _all: true },
-    }),
-    // Category distribution
-    prisma.supportTicket.groupBy({
-      by: ['category'],
-      where: dateFilter,
-      _count: { _all: true },
-    }),
-    // Priority distribution
-    prisma.supportTicket.groupBy({
-      by: ['priority'],
-      where: dateFilter,
-      _count: { _all: true },
-    }),
-    // Resolution time stats - limited fields, in-memory calc
-    prisma.supportTicket.findMany({
-      where: {
-        status: TicketStatus.RESOLVED,
-        resolvedAt: { not: null },
-        ...dateFilter,
-      },
-      select: { createdAt: true, resolvedAt: true },
-    }),
-    // CSAT stats
-    prisma.supportTicket.aggregate({
-      where: {
-        satisfactionRating: { not: null },
-        ...dateFilter,
-      },
-      _avg: { satisfactionRating: true },
-      _count: { satisfactionRating: true },
-    }),
-  ]);
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const dateFilter = { createdAt: { gte: rangeStart, lte: rangeEnd } };
 
-  // Format distribution results
-  const formatDistribution = (items: any[], keyField: string) => {
-    return items.reduce(
-      (acc, item) => {
-        const key = item[keyField];
-        acc[key] = item._count._all;
-        return acc;
-      },
-      {} as Record<string, number>,
+    // Parallel queries for all analytics
+    const [
+      statusCounts,
+      categoryCounts,
+      priorityCounts,
+      resolutionTickets,
+      csatStats,
+    ] = await Promise.all([
+      // Status distribution
+      prisma.supportTicket.groupBy({
+        by: ['status'],
+        where: dateFilter,
+        _count: { _all: true },
+      }),
+      // Category distribution
+      prisma.supportTicket.groupBy({
+        by: ['category'],
+        where: dateFilter,
+        _count: { _all: true },
+      }),
+      // Priority distribution
+      prisma.supportTicket.groupBy({
+        by: ['priority'],
+        where: dateFilter,
+        _count: { _all: true },
+      }),
+      // Resolution time stats - limited fields, in-memory calc
+      prisma.supportTicket.findMany({
+        where: {
+          status: TicketStatus.RESOLVED,
+          resolvedAt: { not: null },
+          ...dateFilter,
+        },
+        select: { createdAt: true, resolvedAt: true },
+      }),
+      // CSAT stats
+      prisma.supportTicket.aggregate({
+        where: {
+          satisfactionRating: { not: null },
+          ...dateFilter,
+        },
+        _avg: { satisfactionRating: true },
+        _count: { satisfactionRating: true },
+      }),
+    ]);
+
+    // Format distribution results
+    const formatDistribution = (items: any[], keyField: string) => {
+      return items.reduce(
+        (acc, item) => {
+          const key = item[keyField];
+          acc[key] = item._count._all;
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
+    };
+
+    // Calculate avg resolution time from fetched tickets
+    const avgResolutionTime = calculateAvgResolutionHours(
+      resolutionTickets as { createdAt: Date; resolvedAt: Date | null }[],
     );
-  };
 
-  // Calculate avg resolution time from fetched tickets
-  const avgResolutionTime = calculateAvgResolutionHours(
-    resolutionTickets as { createdAt: Date; resolvedAt: Date | null }[],
-  );
+    // Safe access for CSAT stats
+    const csatAvg = csatStats._avg?.satisfactionRating ?? 0;
+    const csatCount = csatStats._count?.satisfactionRating ?? 0;
+    const avgCSAT = csatCount > 0 ? Math.round(csatAvg * 100) / 100 : 0;
 
-  // Safe access for CSAT stats
-  const csatAvg = csatStats._avg?.satisfactionRating ?? 0;
-  const csatCount = csatStats._count?.satisfactionRating ?? 0;
-  const avgCSAT = csatCount > 0 ? Math.round(csatAvg * 100) / 100 : 0;
+    return {
+      period: period || 'weekly',
+      dateRange: { rangeStart, rangeEnd },
+      statusDistribution: formatDistribution(statusCounts, 'status'),
+      categoryDistribution: formatDistribution(categoryCounts, 'category'),
+      priorityDistribution: formatDistribution(priorityCounts, 'priority'),
+      avgResolutionTimeHours: avgResolutionTime,
+      avgCSAT,
+    };
+  });
 
-  return {
+  return cached ?? {
     period: period || 'weekly',
     dateRange: { rangeStart, rangeEnd },
-    statusDistribution: formatDistribution(statusCounts, 'status'),
-    categoryDistribution: formatDistribution(categoryCounts, 'category'),
-    priorityDistribution: formatDistribution(priorityCounts, 'priority'),
-    avgResolutionTimeHours: avgResolutionTime,
-    avgCSAT,
+    statusDistribution: {},
+    categoryDistribution: {},
+    priorityDistribution: {},
+    avgResolutionTimeHours: 0,
+    avgCSAT: 0,
   };
 };
 
