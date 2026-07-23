@@ -38,7 +38,9 @@ import emailSender, {
   ticketCreatedUserEmail,
   ticketCreatedAdminEmail,
 } from '../../utils/sendMail';
+import { mailQueue } from '../../helpers/queue';
 import { handleFileUploads } from '../../utils/handleFile';
+import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
 
 // Types for filters
 type ITicketFilterRequest = {
@@ -60,9 +62,36 @@ type ITicketFilterRequest = {
 // Fix: Booking validation moved INSIDE transaction to close TOCTOU race
 // ============================================================
 const createTicket = async (req: Request) => {
-  const createdById = req.user.id;
-  const { subject, description, category, priority, relatedBookingId } =
-    req.body;
+  const userRole = req.user.role;
+  const {
+    subject,
+    description,
+    category,
+    priority,
+    relatedBookingId,
+    createdById: bodyCreatedById,
+  } = req.body;
+
+  // Admin/SuperAdmin can create a ticket on behalf of another user
+  const isAdmin = [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN].includes(
+    userRole,
+  );
+  const ticketOwnerId =
+    isAdmin && bodyCreatedById ? bodyCreatedById : req.user.id;
+
+  // If admin provides a createdById, validate that user exists
+  if (isAdmin && bodyCreatedById) {
+    const targetUser = await prisma.user.findUnique({
+      where: { id: bodyCreatedById },
+      select: { id: true },
+    });
+    if (!targetUser) {
+      throw new ApiError(
+        httpStatus.NOT_FOUND,
+        'User not found for createdById',
+      );
+    }
+  }
 
   // ATOMIC TRANSACTION: Validate booking + generate number + create ticket + notify admins
   const result = await prisma.$transaction(async tx => {
@@ -94,7 +123,7 @@ const createTicket = async (req: Request) => {
         description,
         category: category || TicketCategory.OTHER,
         priority: priority || TicketPriority.MEDIUM,
-        createdById,
+        createdById: ticketOwnerId,
         relatedBookingId,
       },
       select: ticketSelect,
@@ -104,7 +133,7 @@ const createTicket = async (req: Request) => {
     await tx.ticketMessage.create({
       data: {
         ticketId: ticket.id,
-        senderId: createdById,
+        senderId: ticketOwnerId,
         message: description,
       },
     });
@@ -115,7 +144,7 @@ const createTicket = async (req: Request) => {
         ticketId: ticket.id,
         fromStatus: null,
         toStatus: TicketStatus.OPEN,
-        changedById: createdById,
+        changedById: ticketOwnerId,
         note: 'Ticket created',
       },
     });
@@ -134,7 +163,7 @@ const createTicket = async (req: Request) => {
       await tx.notification.create({
         data: {
           receiverId: admin.id,
-          senderId: createdById,
+          senderId: ticketOwnerId,
           title: 'New Support Ticket',
           body: `Ticket ${ticketNumber}: ${subject.substring(0, 100)}`,
           type: 'Message',
@@ -146,29 +175,29 @@ const createTicket = async (req: Request) => {
     return { ticket, admins };
   });
 
+  await CacheInvalidator.onRecordCreate('supportTicket');
+
   // ============================================================
-  // SEND EMAILS (outside transaction to avoid blocking DB)
+  // QUEUE EMAILS via BullMQ (non-blocking)
   // ============================================================
-  const mailPromises: Promise<any>[] = [];
 
   // Email to ticket creator
   const creator = await prisma.user.findUnique({
-    where: { id: createdById },
+    where: { id: ticketOwnerId },
     select: { email: true, fullName: true },
   });
 
   if (creator?.email) {
-    mailPromises.push(
-      emailSender(
-        creator.email,
-        ticketCreatedUserEmail(
-          creator.fullName,
-          result.ticket.ticketNumber,
-          subject,
-        ),
-        `Support Ticket Created: ${result.ticket.ticketNumber}`,
-      ).catch(err => console.error('Ticket creator email failed:', err)),
-    );
+    mailQueue.add('send-email', {
+      type: 'ticket-created-user',
+      to: creator.email,
+      html: ticketCreatedUserEmail(
+        creator.fullName,
+        result.ticket.ticketNumber,
+        subject,
+      ),
+      subject: `Support Ticket Created: ${result.ticket.ticketNumber}`,
+    }).catch(err => console.error('Ticket creator email queue failed:', err));
   }
 
   // Email to each admin
@@ -184,23 +213,18 @@ const createTicket = async (req: Request) => {
   const creatorName = creator?.fullName ?? 'A user';
   for (const admin of admins) {
     if (admin.email) {
-      mailPromises.push(
-        emailSender(
-          admin.email,
-          ticketCreatedAdminEmail(
-            admin.fullName,
-            creatorName,
-            result.ticket.ticketNumber,
-            subject,
-          ),
-          `New Support Ticket: ${result.ticket.ticketNumber}`,
-        ).catch(err => console.error('Admin ticket email failed:', err)),
-      );
+      mailQueue.add('send-email', {
+        type: 'ticket-created-admin',
+        to: admin.email,
+        html: ticketCreatedAdminEmail(
+          admin.fullName,
+          creatorName,
+          result.ticket.ticketNumber,
+          subject,
+        ),
+        subject: `New Support Ticket: ${result.ticket.ticketNumber}`,
+      }).catch(err => console.error('Admin ticket email queue failed:', err));
     }
-  }
-
-  if (mailPromises.length > 0) {
-    await Promise.all(mailPromises);
   }
 
   return result.ticket;
@@ -256,22 +280,22 @@ const getTicketList = async (
   const whereConditions: Prisma.SupportTicketWhereInput =
     andConditions.length > 0 ? { AND: andConditions } : {};
 
-  // Parallel queries for performance
-  const [result, total] = await Promise.all([
-    prisma.supportTicket.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      select: ticketListItemSelect,
-    }),
-    prisma.supportTicket.count({ where: whereConditions }),
-  ]);
+  const cacheKey = await CacheKeys.list('supportTicket', { page, limit, searchTerm, ...filterData, userId, userRole });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [result, total] = await Promise.all([
+      prisma.supportTicket.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: ticketListItemSelect,
+      }),
+      prisma.supportTicket.count({ where: whereConditions }),
+    ]);
+    return { meta: { total, page, limit }, data: result };
+  });
 
-  return {
-    meta: { total, page, limit },
-    data: result,
-  };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // ============================================================
@@ -296,11 +320,11 @@ const getTicketById = async (req: Request) => {
   const messageSkip = (messagePage - 1) * messageLimit;
 
   // Fetch ticket detail (without messages) + paginated messages in parallel
-  const [ticket, totalMessages, messages] = await Promise.all([
-    prisma.supportTicket.findUnique({
-      where: { id },
-      select: ticketSelect,
-    }),
+  const cacheKey = await CacheKeys.single('supportTicket', id);
+  const [ticketData, totalMessages, messages] = await Promise.all([
+    cacheOr(cacheKey, TTL.MEDIUM, () =>
+      prisma.supportTicket.findUnique({ where: { id }, select: ticketSelect }),
+    ),
     prisma.ticketMessage.count({
       where: {
         ticketId: id,
@@ -319,23 +343,17 @@ const getTicketById = async (req: Request) => {
     }),
   ]);
 
-  if (!ticket) {
+  if (!ticketData) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Ticket not found');
   }
 
   // Access control
-  if (
-    !canAccessTicket(
-      ticket.createdById || '',
-      userId,
-      userRole,
-    )
-  ) {
+  if (!canAccessTicket(ticketData.createdById || '', userId, userRole)) {
     throw new ApiError(httpStatus.FORBIDDEN, 'You cannot access this ticket');
   }
 
   return {
-    ...ticket,
+    ...ticketData,
     messages,
     messagePagination: {
       total: totalMessages,
@@ -345,8 +363,6 @@ const getTicketById = async (req: Request) => {
     },
   };
 };
-
-
 
 // ============================================================
 // CHANGE TICKET STATUS - Transaction with logging
@@ -428,6 +444,8 @@ const changeTicketStatus = async (req: Request) => {
 
     return updated;
   });
+
+  await CacheInvalidator.onRecordUpdate('supportTicket', id);
 
   return result;
 };
@@ -511,13 +529,7 @@ const createTicketMessage = async (req: Request) => {
     STAFF_ROLES.includes(userRole as (typeof STAFF_ROLES)[number]);
 
   // Check access
-  if (
-    !canAccessTicket(
-      ticket.createdById || '',
-      senderId,
-      userRole,
-    )
-  ) {
+  if (!canAccessTicket(ticket.createdById || '', senderId, userRole)) {
     throw new ApiError(httpStatus.FORBIDDEN, 'You cannot reply to this ticket');
   }
 
@@ -558,6 +570,9 @@ const createTicketMessage = async (req: Request) => {
 
     return newMessage;
   });
+
+  // Invalidate ticket cache (message added, possibly status changed)
+  await CacheInvalidator.onRecordUpdate('supportTicket', ticketId);
 
   return result;
 };
@@ -610,6 +625,7 @@ const addSatisfactionRating = async (req: Request) => {
     select: ticketSelect,
   });
 
+  await CacheInvalidator.onRecordUpdate('supportTicket', ticketId);
   return result;
 };
 

@@ -1,7 +1,7 @@
 import { NotifyType } from '@prisma/client';
 import ApiError from '../errors/AppError';
 import { prisma } from '../utils/prisma';
-import admin from 'firebase-admin';
+import { getMessaging } from 'firebase-admin/messaging';
 
 interface CreateNotificationParams {
   receiverId: string;
@@ -21,7 +21,7 @@ export const sendPushNotification = async (
   if (!fcmToken) return;
 
   try {
-    await admin.messaging().send({
+    await getMessaging().send({
       token: fcmToken,
       notification: { title, body },
     });

@@ -69,7 +69,7 @@ const getBookingCalendarList = catchAsync(
     const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
     const filters = pick(req.query, bookingFilterableFields);
     const result =
-      await bookingService.getBookingListCallenderForAdminAndSuperAdminClinic(
+      await bookingService.getBookingListCalendarForAdminAndSuperAdminClinic(
         req,
         options,
         filters,

@@ -16,6 +16,9 @@ model MedicalRecord {
     driver             User              @relation("DriverMedicalRecords", fields: [driverId], references: [id])
     clinic             User              @relation(fields: [clinicId], references: [id])
 
+    @@index([driverId])
+    @@index([clinicId])
+    @@index([driverId, createdAt])
     @@map("medical_records")
 }
 enum MedicalResult {

@@ -11,7 +11,9 @@ import emailSender, {
   newOrganizerRequestAdminEmail,
   organizerRequestConfirmedEmail,
 } from '../../utils/sendMail';
+import { mailQueue } from '../../helpers/queue';
 import { getAdminAndSuperAdminEmails } from '../booking/booking.helper';
+import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
 
 const baseOrganizerRequestInclude: Prisma.OrganizerRequestInclude = {
   service: true,
@@ -35,6 +37,8 @@ const createOrganizerRequest = async (req: Request) => {
     include: baseOrganizerRequestInclude,
   });
 
+  await CacheInvalidator.onRecordCreate('organizerRequest');
+
   // ----------------------------------------------------------
   // Fetch organizer + service + admins for notifications
   // ----------------------------------------------------------
@@ -53,10 +57,11 @@ const createOrganizerRequest = async (req: Request) => {
   // Email + Notification → all admins & super admins
   // ----------------------------------------------------------
   for (const admin of admins) {
-    // email
-    emailSender(
-      admin.email,
-      newOrganizerRequestAdminEmail(
+    // queue email via BullMQ (non-blocking)
+    mailQueue.add('send-email', {
+      type: 'organizer-request-admin',
+      to: admin.email,
+      html: newOrganizerRequestAdminEmail(
         admin.fullName,
         organizer?.fullName ?? 'Organizer',
         companyName,
@@ -65,10 +70,10 @@ const createOrganizerRequest = async (req: Request) => {
         organizerRequest.totalDriver,
         organizerRequest.location,
       ),
-      'New Organizer Request Submitted',
-    ).catch(err => console.error('Admin organizer request mail failed:', err));
+      subject: 'New Organizer Request Submitted',
+    }).catch(err => console.error('Admin organizer request mail queue failed:', err));
 
-    // notification
+    // notification (fire-and-forget)
     prisma.notification
       .create({
         data: {
@@ -117,64 +122,72 @@ const getOrganizerRequestList = async (
     AND: andConditions,
   };
 
-  const [
-    result,
-    total,
-    corporateClients,
-    activeCorporate,
-    monthlyBookings,
-    reqCorporates,
-  ] = await Promise.all([
-    prisma.organizerRequest.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      include: baseOrganizerRequestInclude,
-    }),
-    prisma.organizerRequest.count({ where: whereConditions }),
-    prisma.user.count({
-      where: { role: UserRoleEnum.ORGINIZER, isDeleted: false },
-    }),
-    prisma.user.count({
-      where: {
-        role: UserRoleEnum.ORGINIZER,
-        status: UserStatus.ACTIVE,
-        isDeleted: false,
-      },
-    }),
-    prisma.organizerRequest.count({
-      where: {
-        isDeleted: false,
-        createdAt: {
-          gte: new Date(new Date().setDate(new Date().getDate() - 30)),
-        },
-      },
-    }),
-    prisma.organizerRequest.count({
-      where: { isDeleted: false, status: 'Pending' },
-    }),
-  ]);
-
-  return {
-    meta: {
+  const cacheKey = await CacheKeys.list('organizerRequest', { page, limit, searchTerm, ...filterData, role: req.user.role, userId: req.user.id });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [
+      result,
       total,
-      page,
-      limit,
       corporateClients,
       activeCorporate,
       monthlyBookings,
       reqCorporates,
-    },
-    data: result,
-  };
+    ] = await Promise.all([
+      prisma.organizerRequest.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        include: baseOrganizerRequestInclude,
+      }),
+      prisma.organizerRequest.count({ where: whereConditions }),
+      prisma.user.count({
+        where: { role: UserRoleEnum.ORGINIZER, isDeleted: false },
+      }),
+      prisma.user.count({
+        where: {
+          role: UserRoleEnum.ORGINIZER,
+          status: UserStatus.ACTIVE,
+          isDeleted: false,
+        },
+      }),
+      prisma.organizerRequest.count({
+        where: {
+          isDeleted: false,
+          createdAt: {
+            gte: new Date(new Date().setDate(new Date().getDate() - 30)),
+          },
+        },
+      }),
+      prisma.organizerRequest.count({
+        where: { isDeleted: false, status: 'Pending' },
+      }),
+    ]);
+
+    return {
+      meta: {
+        total,
+        page,
+        limit,
+        corporateClients,
+        activeCorporate,
+        monthlyBookings,
+        reqCorporates,
+      },
+      data: result,
+    };
+  });
+
+  return cached ?? { meta: { total: 0, page, limit, corporateClients: 0, activeCorporate: 0, monthlyBookings: 0, reqCorporates: 0 }, data: [] };
 };
 
 const getOrganizerRequestById = async (id: string, user: any) => {
-  const result = await prisma.organizerRequest.findUnique({
-    where: { id },
-    include: baseOrganizerRequestInclude,
-  });
+  const cacheKey = await CacheKeys.single('organizerRequest', id);
+  const result = await cacheOr(cacheKey, TTL.MEDIUM, () =>
+    prisma.organizerRequest.findUnique({
+      where: { id },
+      include: baseOrganizerRequestInclude,
+    }),
+  );
 
   if (!result || result.isDeleted) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Organizer Request not found');
@@ -226,33 +239,38 @@ const getMyOrganizerRequest = async (
     AND: andConditions,
   };
 
-  const [result, total] = await Promise.all([
-    prisma.organizerRequest.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        ...baseOrganizerRequestInclude,
-        _count: { select: { drivers: true } },
-      },
-    }),
-    prisma.organizerRequest.count({ where: whereConditions }),
-  ]);
+  const cacheKey = await CacheKeys.myList('organizerRequest', userId, { page, limit, searchTerm, ...filterData });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [result, total] = await Promise.all([
+      prisma.organizerRequest.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          ...baseOrganizerRequestInclude,
+          _count: { select: { drivers: true } },
+        },
+      }),
+      prisma.organizerRequest.count({ where: whereConditions }),
+    ]);
 
-  const data = result.map(item => {
-    const expectedCount = Number(item.totalDriver?.trim());
-    const addedCount = item._count.drivers;
+    const data = result.map(item => {
+      const expectedCount = Number(item.totalDriver?.trim());
+      const addedCount = item._count.drivers;
 
-    const rosterStatus =
-      !Number.isNaN(expectedCount) && expectedCount === addedCount
-        ? 'Block'
-        : 'Open';
+      const rosterStatus =
+        !Number.isNaN(expectedCount) && expectedCount === addedCount
+          ? 'Block'
+          : 'Open';
 
-    return { ...item, rosterStatus };
+      return { ...item, rosterStatus };
+    });
+
+    return { meta: { total, page, limit }, data };
   });
 
-  return { meta: { total, page, limit }, data };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 const updateOrganizerRequest = async (req: Request) => {
@@ -264,11 +282,14 @@ const updateOrganizerRequest = async (req: Request) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Organizer Request not found');
   }
 
-  return await prisma.organizerRequest.update({
+  const result = await prisma.organizerRequest.update({
     where: { id },
     data,
     include: baseOrganizerRequestInclude,
   });
+
+  await CacheInvalidator.onRecordUpdate('organizerRequest', id);
+  return result;
 };
 
 // Admin and SuperAdmin workflow step
@@ -298,6 +319,8 @@ const assignClinicAndStatus = async (
     include: baseOrganizerRequestInclude,
   });
 
+  await CacheInvalidator.onRecordUpdate('organizerRequest', id);
+
   // only send mails when status is being set to Confirmed with a clinic
   if (status === 'Confirmed' && clinicId) {
     const clinic = await prisma.user.findUnique({
@@ -305,38 +328,40 @@ const assignClinicAndStatus = async (
       select: { fullName: true, email: true },
     });
 
-    // email → clinic
+    // queue email → clinic via BullMQ (non-blocking)
     if (clinic?.email) {
-      emailSender(
-        clinic.email,
-        clinicAssignedEmail(
+      mailQueue.add('send-email', {
+        type: 'clinic-assigned',
+        to: clinic.email,
+        html: clinicAssignedEmail(
           clinic.fullName,
           existing.companyName,
           id,
           existing.service.title,
           existing.totalDriver,
         ),
-        'New Organizer Request Assigned to Your Clinic',
-      ).catch(err => console.error('Clinic assign mail failed:', err));
+        subject: 'New Organizer Request Assigned to Your Clinic',
+      }).catch(err => console.error('Clinic assign mail queue failed:', err));
     }
 
-    // email → organizer
+    // queue email → organizer via BullMQ (non-blocking)
     if (existing.organizer.email) {
-      emailSender(
-        existing.organizer.email,
-        organizerRequestConfirmedEmail(
+      mailQueue.add('send-email', {
+        type: 'organizer-confirmed',
+        to: existing.organizer.email,
+        html: organizerRequestConfirmedEmail(
           existing.organizer.fullName,
           existing.companyName,
           id,
           clinic?.fullName ?? 'Assigned Clinic',
           existing.service.title,
         ),
-        'Your Request Has Been Confirmed – Add Your Drivers',
-      ).catch(err => console.error('Organizer confirm mail failed:', err));
+        subject: 'Your Request Has Been Confirmed – Add Your Drivers',
+      }).catch(err => console.error('Organizer confirm mail queue failed:', err));
     }
 
-    // notification → organizer
-    await prisma.notification.create({
+    // notification → organizer (fire-and-forget)
+    prisma.notification.create({
       data: {
         receiverId: existing.userId,
         title: 'Request Confirmed',
@@ -344,11 +369,11 @@ const assignClinicAndStatus = async (
         type: 'OrganizerRequest',
         referenceId: id,
       },
-    });
+    }).catch(err => console.error('Organizer notification failed:', err));
 
-    // notification → clinic
+    // notification → clinic (fire-and-forget)
     if (clinicId) {
-      await prisma.notification.create({
+      prisma.notification.create({
         data: {
           receiverId: clinicId,
           title: 'New Request Assigned',
@@ -356,7 +381,7 @@ const assignClinicAndStatus = async (
           type: 'OrganizerRequest',
           referenceId: id,
         },
-      });
+      }).catch(err => console.error('Clinic notification failed:', err));
     }
   }
 
@@ -413,6 +438,9 @@ const addDriversToRequest = async (
     }),
   ]);
 
+  // Invalidate organizerRequest cache (drivers changed, affects detail view)
+  await CacheInvalidator.onRecordUpdate('organizerRequest', id);
+
   const updatedRequest = await prisma.organizerRequest.findUnique({
     where: { id },
     include: baseOrganizerRequestInclude,
@@ -437,11 +465,14 @@ const softDeleteOrganizerRequest = async (id: string) => {
     );
   }
 
-  return await prisma.organizerRequest.update({
+  const result = await prisma.organizerRequest.update({
     where: { id },
     data: { isDeleted: true },
     include: baseOrganizerRequestInclude,
   });
+
+  await CacheInvalidator.onRecordUpdate('organizerRequest', id);
+  return result;
 };
 
 const deleteOrganizerRequest = async (id: string) => {
@@ -449,7 +480,9 @@ const deleteOrganizerRequest = async (id: string) => {
   if (!existing) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Organizer Request not found');
   }
-  return await prisma.organizerRequest.delete({ where: { id } });
+  const result = await prisma.organizerRequest.delete({ where: { id } });
+  await CacheInvalidator.onRecordDelete('organizerRequest', id);
+  return result;
 };
 
 export const organizerRequestService = {

@@ -3,6 +3,7 @@ import catchAsync from '../../utils/catchAsync';
 import auth from '../../middlewares/auth';
 import prisma from '../../utils/prisma';
 import authOptional from '../../middlewares/authOptional';
+import { cacheControl, cacheProfiles } from '../../middlewares/cacheControl';
 
 const router = express.Router();
 
@@ -22,9 +23,10 @@ router.post(
 router.get(
   '/',
   authOptional(),
+  cacheControl(cacheProfiles.static),
   catchAsync(async (req, res) => {
     const result = await prisma.terms.findFirst();
-    res.status(201).json(result);
+    res.status(200).json(result);
   }),
 );
 router.put(

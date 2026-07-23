@@ -4,16 +4,25 @@ import emailSender, {
   paymentSuccessAdminEmail,
   paymentSuccessDriverEmail,
 } from '../../utils/sendMail';
+import { mailQueue } from '../../helpers/queue';
+import { cacheOr, CacheKeys, TTL } from '../../../lib/redis';
 
 export const getAdminAndSuperAdminEmails = async () => {
-  const admins = await prisma.user.findMany({
-    where: {
-      role: { in: [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN] },
-      isDeleted: false,
+  const result = await cacheOr(
+    await CacheKeys.single('admin', 'emails'),
+    TTL.LONG,
+    async () => {
+      const admins = await prisma.user.findMany({
+        where: {
+          role: { in: [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN] },
+          isDeleted: false,
+        },
+        select: { id: true, email: true, fullName: true },
+      });
+      return admins;
     },
-    select: { id: true, email: true, fullName: true },
-  });
-  return admins;
+  );
+  return result ?? [];
 };
 
 export const sendPaymentSuccessMails = async (
@@ -40,9 +49,10 @@ export const sendPaymentSuccessMails = async (
   const clinicName = booking?.clinic?.fullName ?? 'N/A';
 
   if (driver?.email) {
-    emailSender(
-      driver.email,
-      paymentSuccessDriverEmail(
+    mailQueue.add('send-email', {
+      type: 'payment-success-driver',
+      to: driver.email,
+      html: paymentSuccessDriverEmail(
         driver.fullName,
         bookingId,
         bookingDateStr,
@@ -50,14 +60,15 @@ export const sendPaymentSuccessMails = async (
         amount,
         paymentMethod,
       ),
-      'Payment Successful – Booking Confirmed',
-    ).catch(err => console.error('Driver payment mail failed:', err));
+      subject: 'Payment Successful – Booking Confirmed',
+    }).catch(err => console.error('Driver payment mail queue failed:', err));
   }
 
   for (const admin of admins) {
-    emailSender(
-      admin.email,
-      paymentSuccessAdminEmail(
+    mailQueue.add('send-email', {
+      type: 'payment-success-admin',
+      to: admin.email,
+      html: paymentSuccessAdminEmail(
         admin.fullName,
         driver?.fullName ?? 'N/A',
         clinicName,
@@ -66,7 +77,7 @@ export const sendPaymentSuccessMails = async (
         amount,
         paymentMethod,
       ),
-      'Payment Received for Booking',
-    ).catch(err => console.error('Admin payment mail failed:', err));
+      subject: 'Payment Received for Booking',
+    }).catch(err => console.error('Admin payment mail queue failed:', err));
   }
 };

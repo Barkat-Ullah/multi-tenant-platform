@@ -14,5 +14,7 @@ model Location {
     admin             User     @relation("LocationCreateAdmin", fields: [adminId], references: [id])
     clinic            User[]
 
+    @@index([adminId])
+    @@index([isDeleted])
     @@map("locations")
 }

@@ -3,14 +3,38 @@ import httpStatus from 'http-status';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
+import compression from 'compression';
 import catchAsync from '../app/utils/catchAsync';
 import AppError from '../app/errors/AppError';
 
 import { prisma } from '../app/utils/prisma';
 import { fileUploader } from '../app/utils/fileUploader';
 import ApiError from '../app/errors/AppError';
+import { isRedisHealthy, redis } from '../lib/redis';
+import requestContext from '../app/middlewares/requestContext';
+import responseLogger from '../app/middlewares/responseLogger';
+import sanitize from '../app/middlewares/sanitize';
+import { getErrorStats } from '../app/utils/errorTracker';
 
 export const setupMiddlewares = (app: Application): void => {
+
+  // 1. Request context — correlation IDs, timing
+  app.use(requestContext);
+
+  // 2. Response logging — request/response audit trail
+  app.use(responseLogger);
+
+  // 3. Input sanitization — XSS & injection protection
+  app.use(sanitize);
+
+  // 4. gzip compression — reduces payload size by 60-80%
+  app.use(compression({
+    filter: (req, res) => {
+      if (req.query['no-compression']) return false;
+      return compression.filter(req, res);
+    },
+    threshold: 1024,
+  }));
 
   // CORS
   app.use(
@@ -37,21 +61,49 @@ export const setupMiddlewares = (app: Application): void => {
   app.use(express.urlencoded({ limit: '500kb', extended: true }));
 };
 
-// Rate limiter
+// ─── Rate Limiters ──────────────────────────────────────────────────────────
+
+const getClientIp = (req: any): string => {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  const ipArray = forwardedFor ? forwardedFor.split(/\s*,\s*/) : [];
+  return ipArray.length > 0 ? ipArray[0] : req.connection.remoteAddress;
+};
+
+// Default API limiter — 2000 requests per 15 minutes per IP
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 2000,
-  keyGenerator: (req: any) => {
-    const forwardedFor = req.headers['x-forwarded-for'];
-    const ipArray = forwardedFor ? forwardedFor.split(/\s*,\s*/) : [];
-    const ipAddress =
-      ipArray.length > 0 ? ipArray[0] : req.connection.remoteAddress;
-    return ipAddress;
-  },
+  keyGenerator: getClientIp,
   message: {
     success: false,
-    message:
-      'Too many requests from this IP, please try again after 15 minutes',
+    message: 'Too many requests from this IP, please try again after 15 minutes',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Strict limiter for auth endpoints — 20 requests per 15 minutes per IP
+// Prevents brute-force attacks on login/register/OTP
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  keyGenerator: getClientIp,
+  message: {
+    success: false,
+    message: 'Too many authentication attempts, please try again after 15 minutes',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Upload limiter — 50 requests per 15 minutes per IP
+export const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  keyGenerator: getClientIp,
+  message: {
+    success: false,
+    message: 'Too many upload requests, please try again after 15 minutes',
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -177,11 +229,43 @@ export const documentUpload = catchAsync(
 );
 
 export const serverHealth = catchAsync(async (req: Request, res: Response) => {
-  await prisma.$connect();
-  res.status(httpStatus.OK).json({
-    success: true,
-    message: '🟢 Server healthy',
+  const [dbOk, redisOk] = await Promise.all([
+    prisma.$connect().then(() => true).catch(() => false),
+    isRedisHealthy(),
+  ]);
+
+  // Cache metrics from Redis INFO
+  let cacheMetrics = null;
+  if (redisOk) {
+    try {
+      const info = await redis.info('stats');
+      const hits = parseInt(info.match(/keyspace_hits:(\d+)/)?.[1] ?? '0', 10);
+      const misses = parseInt(info.match(/keyspace_misses:(\d+)/)?.[1] ?? '0', 10);
+      const total = hits + misses;
+      cacheMetrics = {
+        hits,
+        misses,
+        hitRate: total > 0 ? `${((hits / total) * 100).toFixed(1)}%` : 'N/A',
+      };
+    } catch {
+      cacheMetrics = null;
+    }
+  }
+
+  const statusCode = dbOk && redisOk ? httpStatus.OK : httpStatus.SERVICE_UNAVAILABLE;
+
+  // Error stats from ring buffer
+  const errorStats = getErrorStats();
+
+  res.status(statusCode).json({
+    success: dbOk && redisOk,
+    message: dbOk && redisOk ? '🟢 Server healthy' : '🟡 Degraded — some services unavailable',
     timestamp: new Date().toISOString(),
-    db: 'Connected',
+    services: {
+      database: dbOk ? 'Connected' : 'Disconnected',
+      redis: redisOk ? 'Connected' : 'Disconnected',
+    },
+    cache: cacheMetrics,
+    errors: errorStats,
   });
 });

@@ -8,6 +8,7 @@ const createSchema = z.object({
   category: z.nativeEnum(TicketCategory).optional(),
   priority: z.nativeEnum(TicketPriority).optional(),
   relatedBookingId: z.string().optional(),
+  createdById: z.string().optional(),
 });
 
 // Update ticket validation (admin only)

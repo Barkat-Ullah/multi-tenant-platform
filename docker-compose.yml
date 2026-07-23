@@ -1,0 +1,254 @@
+services:
+  # ─────────────────────────────────────────
+  # Node.js App (API Server)
+  # ─────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medi-app
+    restart: unless-stopped
+    ports:  
+      - '${PORT:-5000}:${PORT:-5000}'
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      IS_WORKER: 'false'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 256M
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - medi-network
+
+  # ─────────────────────────────────────────
+  # Node.js Worker (BullMQ Background Jobs)
+  # ─────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medi-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      IS_WORKER: 'true'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 256M
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - medi-network
+
+  # ─────────────────────────────────────────
+  # MongoDB
+  # ─────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: medi-mongo
+    restart: unless-stopped
+    ports:
+      - '27018:27017'
+    volumes:
+      - mongo_data:/data/db
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1536M
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - medi-network
+
+  # ─────────────────────────────────────────
+  # Redis (BullMQ + Cache)
+  # ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: medi-redis
+    restart: unless-stopped
+    ports:
+      - '6380:6379'
+    command: >
+      sh -c '
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          redis-server --requirepass $$REDIS_PASSWORD
+        else
+          redis-server
+        fi
+      '
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 256M
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -a "$$REDIS_PASSWORD" ping; else redis-cli ping; fi',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - medi-network
+
+# ─────────────────────────────────────────
+# Volumes & Network
+# ─────────────────────────────────────────
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  medi-network:
+    driver: bridge
+
+#------------------------------------------------
+# for production
+# services:
+#   # ─────────────────────────────────────────
+#   # Node.js App (API Server)
+#   # ─────────────────────────────────────────
+#   app:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     container_name: medi-app
+#     restart: unless-stopped
+#     ports:
+#       - '${PORT:-5000}:${PORT:-5000}'
+#     env_file:
+#       - .env
+#     environment:
+#       NODE_ENV: production
+#       REDIS_HOST: redis
+#       REDIS_PORT: 6379
+#       IS_WORKER: 'false'
+#     deploy:
+#       resources:
+#         limits:
+#           cpus: '0.50'
+#           memory: 300M
+#         reservations:
+#           memory: 150M
+#     depends_on:
+#       redis:
+#         condition: service_healthy
+#     networks:
+#       - medi-network
+
+#   # ─────────────────────────────────────────
+#   # Node.js Worker (BullMQ Background Jobs)
+#   # ─────────────────────────────────────────
+#   worker:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     container_name: medi-worker
+#     restart: unless-stopped
+#     env_file:
+#       - .env
+#     environment:
+#       NODE_ENV: production
+#       REDIS_HOST: redis
+#       REDIS_PORT: 6379
+#       IS_WORKER: 'true'
+#     deploy:
+#       resources:
+#         limits:
+#           cpus: '0.30'
+#           memory: 200M
+#         reservations:
+#           memory: 100M
+#     depends_on:
+#       redis:
+#         condition: service_healthy
+#     networks:
+#       - medi-network
+
+#   # ─────────────────────────────────────────
+#   # Redis (BullMQ + Cache)
+#   # ─────────────────────────────────────────
+#   redis:
+#     image: redis:7-alpine
+#     container_name: medi-redis
+#     restart: unless-stopped
+#     ports:
+#       - '6380:6379'
+#     command: >
+#       sh -c '
+#         if [ -n "$$REDIS_PASSWORD" ]; then
+#           redis-server --requirepass $$REDIS_PASSWORD --maxmemory 150mb --maxmemory-policy allkeys-lru
+#         else
+#           redis-server --maxmemory 150mb --maxmemory-policy allkeys-lru
+#         fi
+#       '
+#     environment:
+#       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+#     volumes:
+#       - redis_data:/data
+#     deploy:
+#       resources:
+#         limits:
+#           cpus: '0.30'
+#           memory: 200M
+#         reservations:
+#           memory: 100M
+#     healthcheck:
+#       test:
+#         [
+#           'CMD-SHELL',
+#           'if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -a "$$REDIS_PASSWORD" ping; else redis-cli ping; fi',
+#         ]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
+#     networks:
+#       - medi-network
+
+# # ─────────────────────────────────────────
+# # Volumes & Network
+# # ─────────────────────────────────────────
+# volumes:
+#   redis_data:
+
+# networks:
+#   medi-network:
+#     driver: bridge

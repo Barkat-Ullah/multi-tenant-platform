@@ -20,6 +20,9 @@ model Payment {
     user              User          @relation(fields: [userId], references: [id])
     booking           Booking?      @relation(fields: [bookingId], references: [id])
 
+    @@index([userId])
+    @@index([status])
+    @@index([status, createdAt])
     @@map("payments")
 }
 

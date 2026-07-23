@@ -15,6 +15,8 @@ import { paginationHelper } from '../../utils/calculatePagination';
 import * as bcrypt from 'bcrypt';
 import emailSender, { inviteClinicEmail } from '../../utils/sendMail';
 import { fileUploader } from '../../utils/fileUploader';
+import { invalidateUserCache } from '../../../lib/authRedis';
+import { CacheInvalidator, cacheOr, CacheKeys, TTL } from '../../../lib/redis';
 
 type IUserFilterRequest = {
   searchTerm?: string;
@@ -82,73 +84,89 @@ const getAllUsersFromDB = async (
           },
         };
 
-  const users = await prisma.user.findMany({
-    where: whereConditions,
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-      image: true,
-      status: true,
-      role: true,
-      phoneNumber: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: 'desc' },
-    skip,
-    take: limit,
+  const cacheKey = await CacheKeys.list('user', { page, limit, searchTerm, ...filterData, scope: 'all' });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const users = await prisma.user.findMany({
+      where: whereConditions,
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        image: true,
+        status: true,
+        role: true,
+        phoneNumber: true,
+        createdAt: true,
+        describe: true,
+        city: true,
+        address: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    });
+
+    const total = await prisma.user.count({
+      where: whereConditions,
+    });
+
+    const formattedData = users.map(user => ({
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      image: user.image,
+      status: user.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED',
+      role: user.role,
+      phoneNumber: user.phoneNumber,
+      describe: user.describe,
+      address: user.address,
+      city: user.city,
+      joinDate: user.createdAt,
+    }));
+
+    return {
+      meta: {
+        total,
+        page,
+        limit,
+      },
+      data: formattedData,
+    };
   });
 
-  const total = await prisma.user.count({
-    where: whereConditions,
-  });
-
-  const formattedData = users.map(user => ({
-    id: user.id,
-    fullName: user.fullName,
-    email: user.email,
-    image: user.image,
-    status: user.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED',
-    role: user.role,
-    phoneNumber: user.phoneNumber,
-    joinDate: user.createdAt,
-  }));
-
-  return {
-    meta: {
-      total,
-      page,
-      limit,
-    },
-    data: formattedData,
-  };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 const getMyimageFromDB = async (id: string) => {
-  const image = await prisma.user.findUnique({
-    where: {
-      id: id,
-    },
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-      phoneNumber: true,
-      role: true,
-      status: true,
-      describe: true,
-      city: true,
-      address: true,
-      image: true,
-      dob: true,
-    },
-  });
+  const cacheKey = await CacheKeys.single('user', id);
+  const image = await cacheOr(cacheKey, TTL.MEDIUM, () =>
+    prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phoneNumber: true,
+        role: true,
+        status: true,
+        describe: true,
+        city: true,
+        address: true,
+        image: true,
+        dob: true,
+      },
+    }),
+  );
 
   return image;
 };
 
-const getUserDetailsFromDB = async (id: string) => {
-  const user = await prisma.user.findUnique({
+const getUserDetailsFromDB = async (req: Request) => {
+  const { id } = req.params;
+
+  const cacheKey = await CacheKeys.single('user', id);
+  const result = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const user = await prisma.user.findUnique({
     where: { id },
     select: {
       id: true,
@@ -161,9 +179,276 @@ const getUserDetailsFromDB = async (id: string) => {
       city: true,
       address: true,
       image: true,
+      dob: true,
+      createdAt: true,
+      // Driver-specific fields
+      licenseNo: true,
+      dateOfBirth: true,
+      medicalStatus: true,
+      medicalExpiry: true,
+      // Clinic-specific fields
+      clinicGmcNumber: true,
+      isParking: true,
+      offDays: true,
+      locationId: true,
+      // Organizer-specific
+      companyLocation: true,
+      organizerId: true,
+      // Admin who created this user
+      createdById: true,
     },
   });
-  return user;
+
+  if (!user) {
+    throw new AppError(httpStatus.NOT_FOUND, 'User not found');
+  }
+
+  const { role } = user;
+
+  // ─── ROLE-BASED DATA FETCH ─────────────────────────────────
+  let roleSpecificData: Record<string, any> = {};
+
+  if (role === UserRoleEnum.USER) {
+    // ── Driver: bookings, medical records, organizer info ──
+    const [bookings, medicalRecords, tickets] = await Promise.all([
+      prisma.booking.findMany({
+        where: { driverId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          scheduledAt: true,
+          status: true,
+          createdAt: true,
+          clinic: { select: { id: true, fullName: true } },
+          service: { select: { id: true, title: true } },
+          timeSlot: { select: { date: true, startTime: true, endTime: true } },
+        },
+      }),
+      prisma.medicalRecord.findMany({
+        where: { driverId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          result: true,
+          files: true,
+          notes: true,
+          expiryDate: true,
+          createdAt: true,
+          clinic: { select: { id: true, fullName: true } },
+          booking: { select: { id: true, scheduledAt: true } },
+        },
+      }),
+      prisma.supportTicket.findMany({
+        where: { createdById: id },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          ticketNumber: true,
+          subject: true,
+          status: true,
+          priority: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    roleSpecificData = {
+      bookings,
+      medicalRecords,
+      tickets,
+      bookingCount: await prisma.booking.count({ where: { driverId: id } }),
+      medicalRecordCount: await prisma.medicalRecord.count({
+        where: { driverId: id },
+      }),
+      ticketCount: await prisma.supportTicket.count({
+        where: { createdById: id },
+      }),
+    };
+
+    // If driver belongs to an organizer, include organizer info
+    if (user.organizerId) {
+      const organizer = await prisma.user.findUnique({
+        where: { id: user.organizerId },
+        select: { id: true, fullName: true, email: true, companyLocation: true },
+      });
+      roleSpecificData.organizer = organizer;
+    }
+  } else if (role === UserRoleEnum.CLINIC) {
+    // ── Clinic: bookings, time slots, services, location ──
+    const [location, clinicServices, bookings, timeSlots, medicalRecords, organizerRequests] =
+      await Promise.all([
+        prisma.location.findUnique({
+          where: { id: user.locationId ?? undefined },
+          select: { id: true, locationName: true, totalBookings: true },
+        }),
+        prisma.clinicService.findMany({
+          where: { clinicId: id },
+          select: {
+            service: { select: { id: true, title: true } },
+          },
+        }),
+        prisma.booking.findMany({
+          where: { clinicId: id },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: {
+            id: true,
+            scheduledAt: true,
+            status: true,
+            createdAt: true,
+            driver: { select: { id: true, fullName: true, email: true } },
+            service: { select: { id: true, title: true } },
+            timeSlot: { select: { date: true, startTime: true, endTime: true } },
+          },
+        }),
+        prisma.timeSlot.findMany({
+          where: { clinicId: id, date: { gte: new Date() } },
+          orderBy: { date: 'asc' },
+          take: 20,
+          select: {
+            id: true,
+            date: true,
+            startTime: true,
+            endTime: true,
+            capacity: true,
+            booked: true,
+            isBooked: true,
+            status: true,
+          },
+        }),
+        prisma.medicalRecord.findMany({
+          where: { clinicId: id },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: {
+            id: true,
+            result: true,
+            expiryDate: true,
+            createdAt: true,
+            driver: { select: { id: true, fullName: true } },
+          },
+        }),
+        prisma.organizerRequest.findMany({
+          where: { clinicId: id },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: {
+            id: true,
+            status: true,
+            companyName: true,
+            totalDriver: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+
+    roleSpecificData = {
+      location: location ?? null,
+      services: clinicServices.map(cs => cs.service),
+      bookings,
+      timeSlots,
+      medicalRecords,
+      organizerRequests,
+      bookingCount: await prisma.booking.count({ where: { clinicId: id } }),
+      timeSlotCount: await prisma.timeSlot.count({ where: { clinicId: id } }),
+      medicalRecordCount: await prisma.medicalRecord.count({
+        where: { clinicId: id },
+      }),
+    };
+  } else if (role === UserRoleEnum.ORGINIZER) {
+    // ── Organizer: drivers, organizer requests ──
+    const [drivers, organizerRequests] = await Promise.all([
+      prisma.user.findMany({
+        where: { organizerId: id, isDeleted: false },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phoneNumber: true,
+          image: true,
+          status: true,
+          medicalStatus: true,
+          medicalExpiry: true,
+          createdAt: true,
+        },
+      }),
+      prisma.organizerRequest.findMany({
+        where: { userId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          companyName: true,
+          status: true,
+          totalDriver: true,
+          createdAt: true,
+          service: { select: { id: true, title: true } },
+          clinic: { select: { id: true, fullName: true } },
+        },
+      }),
+    ]);
+
+    roleSpecificData = {
+      drivers,
+      organizerRequests,
+      driverCount: drivers.length,
+      organizerRequestCount: await prisma.organizerRequest.count({
+        where: { userId: id },
+      }),
+    };
+  } else if (role === UserRoleEnum.ADMIN || role === UserRoleEnum.SUPERADMIN) {
+    // ── Admin/SuperAdmin: created users, activity log ──
+    const [createdUsers, recentAuditLogs] = await Promise.all([
+      prisma.user.findMany({
+        where: { createdById: id, isDeleted: false },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          status: true,
+          createdAt: true,
+        },
+      }),
+      prisma.auditLog.findMany({
+        where: { actorId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          action: true,
+          targetModel: true,
+          targetId: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    roleSpecificData = {
+      createdUsers,
+      recentActivity: recentAuditLogs,
+      totalUsersCreated: await prisma.user.count({
+        where: { createdById: id, isDeleted: false },
+      }),
+    };
+  }
+
+  return {
+    ...user,
+    roleSpecificData,
+  };
+  });
+
+  if (!result) {
+    throw new AppError(httpStatus.NOT_FOUND, 'User not found');
+  }
+  return result;
 };
 
 //
@@ -188,6 +473,8 @@ const createOrgDriverIntoDB = async (req: Request) => {
       password,
     },
   });
+
+  await CacheInvalidator.onRecordCreate('user');
   return result;
 };
 
@@ -220,59 +507,64 @@ const getAllOrgDriverFromDB = async (
 
   const whereConditions: Prisma.UserWhereInput = { AND: andConditions };
 
-  const [drivers, total] = await Promise.all([
-    prisma.user.findMany({
-      where: whereConditions,
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        image: true,
-        status: true,
-        phoneNumber: true,
-        medicalRecords: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: {
-            result: true,
-            expiryDate: true,
-            createdAt: true,
-            organizerRequest: {
-              select: {
-                service: {
-                  select: { title: true },
+  const cacheKey = await CacheKeys.myList('user', req.user.id, { page, limit, searchTerm, status, scope: 'orgDrivers' });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [drivers, total] = await Promise.all([
+      prisma.user.findMany({
+        where: whereConditions,
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          image: true,
+          status: true,
+          phoneNumber: true,
+          medicalRecords: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: {
+              result: true,
+              expiryDate: true,
+              createdAt: true,
+              organizerRequest: {
+                select: {
+                  service: {
+                    select: { title: true },
+                  },
                 },
               },
             },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
-    }),
-    prisma.user.count({ where: whereConditions }),
-  ]);
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.user.count({ where: whereConditions }),
+    ]);
 
-  const data = drivers.map(driver => {
-    const latestRecord = driver.medicalRecords?.[0] ?? null;
+    const data = drivers.map(driver => {
+      const latestRecord = driver.medicalRecords?.[0] ?? null;
+
+      return {
+        id: driver.id,
+        fullName: driver.fullName,
+        email: driver.email,
+        image: driver.image,
+        lastMedical: latestRecord?.createdAt ?? null,
+        expiryDate: latestRecord?.expiryDate ?? null,
+        service: latestRecord?.organizerRequest?.service?.title ?? null,
+        medicalResult: latestRecord?.result ?? 'Pending',
+      };
+    });
 
     return {
-      id: driver.id,
-      fullName: driver.fullName,
-      email: driver.email,
-      image: driver.image,
-      lastMedical: latestRecord?.createdAt ?? null,
-      expiryDate: latestRecord?.expiryDate ?? null,
-      service: latestRecord?.organizerRequest?.service?.title ?? null,
-      medicalResult: latestRecord?.result ?? 'Pending',
+      meta: { total, page, limit },
+      data,
     };
   });
 
-  return {
-    meta: { total, page, limit },
-    data,
-  };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 const getAllOrgDriverReportsFromDB = async (
@@ -312,45 +604,50 @@ const getAllOrgDriverReportsFromDB = async (
     AND: andConditions,
   };
 
-  const [records, total] = await Promise.all([
-    prisma.medicalRecord.findMany({
-      where: whereConditions,
-      select: {
-        id: true,
-        files: true,
-        createdAt: true,
-        driver: {
-          select: { id: true, fullName: true, image: true, phoneNumber: true },
-        },
-        clinic: {
-          select: { id: true, fullName: true },
-        },
-        organizerRequest: {
-          select: {
-            service: { select: { id: true, title: true } },
+  const cacheKey = await CacheKeys.myList('medicalRecord', req.user.id, { page, limit, searchTerm, scope: 'orgReports' });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [records, total] = await Promise.all([
+      prisma.medicalRecord.findMany({
+        where: whereConditions,
+        select: {
+          id: true,
+          files: true,
+          createdAt: true,
+          driver: {
+            select: { id: true, fullName: true, image: true, phoneNumber: true },
+          },
+          clinic: {
+            select: { id: true, fullName: true },
+          },
+          organizerRequest: {
+            select: {
+              service: { select: { id: true, title: true } },
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
-    }),
-    prisma.medicalRecord.count({ where: whereConditions }),
-  ]);
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.medicalRecord.count({ where: whereConditions }),
+    ]);
 
-  const data = records.map(record => ({
-    id: record.id,
-    title: record.organizerRequest?.service?.title ?? 'N/A',
-    driverName: record.driver?.fullName ?? 'N/A',
-    generatedDate: record.createdAt,
-    hospitalName: record.clinic?.fullName ?? 'N/A',
-    fileUrl: record.files ?? null,
-  }));
+    const data = records.map(record => ({
+      id: record.id,
+      title: record.organizerRequest?.service?.title ?? 'N/A',
+      driverName: record.driver?.fullName ?? 'N/A',
+      generatedDate: record.createdAt,
+      hospitalName: record.clinic?.fullName ?? 'N/A',
+      fileUrl: record.files ?? null,
+    }));
 
-  return {
-    meta: { total, page, limit },
-    data,
-  };
+    return {
+      meta: { total, page, limit },
+      data,
+    };
+  });
+
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 //clinic
 
@@ -482,6 +779,12 @@ const createClinicIntoDB = async (req: Request) => {
     };
   });
 
+  // Invalidate user + location caches
+  await Promise.all([
+    CacheInvalidator.onRecordCreate('user'),
+    CacheInvalidator.onRelatedChange('location'),
+  ]);
+
   // send invite email in background — don't block response
   emailSender(
     email,
@@ -543,58 +846,63 @@ const getAllClinicsFromDB = async (
       ? { AND: andConditions }
       : { role: UserRoleEnum.CLINIC };
 
-  const [users, total] = await prisma.$transaction([
-    prisma.user.findMany({
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        phoneNumber: true,
-        status: true,
-        clinicGmcNumber: true,
-        isParking: true,
-        createdAt: true,
-        location: {
-          select: {
-            id: true,
-            locationName: true,
+  const cacheKey = await CacheKeys.list('user', { page, limit, searchTerm, ...filterData, scope: 'clinics' });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [users, total] = await prisma.$transaction([
+      prisma.user.findMany({
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phoneNumber: true,
+          status: true,
+          clinicGmcNumber: true,
+          isParking: true,
+          createdAt: true,
+          location: {
+            select: {
+              id: true,
+              locationName: true,
+            },
           },
-        },
-        clinicServices: {
-          where: {
-            service: { isDeleted: false },
-          },
-          select: {
-            service: {
-              select: {
-                id: true,
-                title: true,
+          clinicServices: {
+            where: {
+              service: { isDeleted: false },
+            },
+            select: {
+              service: {
+                select: {
+                  id: true,
+                  title: true,
+                },
               },
             },
           },
         },
+      }),
+      prisma.user.count({ where: whereConditions }),
+    ]);
+
+    const data = users.map(({ clinicServices, ...user }) => ({
+      ...user,
+      services: clinicServices.map(cs => cs.service),
+    }));
+
+    return {
+      meta: {
+        total,
+        page,
+        limit,
       },
-    }),
-    prisma.user.count({ where: whereConditions }),
-  ]);
+      data,
+    };
+  });
 
-  const data = users.map(({ clinicServices, ...user }) => ({
-    ...user,
-    services: clinicServices.map(cs => cs.service),
-  }));
-
-  return {
-    meta: {
-      total,
-      page,
-      limit,
-    },
-    data,
-  };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 const updateClinicIntoDB = async (req: Request) => {
@@ -722,6 +1030,9 @@ const updateClinicIntoDB = async (req: Request) => {
     };
   });
 
+  // Invalidate user + service caches (clinic services may have changed)
+  await CacheInvalidator.onRecordUpdate('user', id);
+
   return clinic;
 };
 
@@ -734,6 +1045,9 @@ const updateUserRoleStatusIntoDB = async (id: string, role: UserRoleEnum) => {
       role: role,
     },
   });
+  // Invalidate user cache on role change
+  await invalidateUserCache(id).catch(() => {});
+  await CacheInvalidator.onRecordUpdate('user', id).catch(() => {});
   return result;
 };
 
@@ -759,6 +1073,10 @@ const updateUserStatus = async (id: string) => {
       image: true,
     },
   });
+
+  // Invalidate user cache on status change (affects auth middleware)
+  await invalidateUserCache(id).catch(() => {});
+  await CacheInvalidator.onRecordUpdate('user', id).catch(() => {});
 
   return result;
 };
@@ -796,6 +1114,9 @@ const softDeleteUserIntoDB = async (id: string) => {
       isDeleted: true,
     },
   });
+  // Invalidate user cache on soft delete (affects auth middleware)
+  await invalidateUserCache(id).catch(() => {});
+  await CacheInvalidator.onRecordUpdate('user', id).catch(() => {});
   return result;
 };
 
@@ -897,6 +1218,10 @@ const updateUserIntoDb = async (req: Request, id: string) => {
     );
   }
 
+  // Invalidate user cache on profile update
+  await invalidateUserCache(id).catch(() => {});
+  await CacheInvalidator.onRecordUpdate('user', id).catch(() => {});
+
   return result;
 };
 
@@ -936,10 +1261,12 @@ const updateMyimageIntoDB = async (
     },
   });
 
+  // Invalidate user cache on profile update
+  await invalidateUserCache(id).catch(() => {});
+  await CacheInvalidator.onRecordUpdate('user', id).catch(() => {});
+
   return result;
 };
-
-// -------------------------------------------------------
 // Admin/SuperAdmin: Update client basic profile fields
 // -------------------------------------------------------
 const updateClientInfoIntoDB = async (
@@ -997,7 +1324,129 @@ const updateClientInfoIntoDB = async (
     );
   }
 
+  // Invalidate user cache (profile fields changed)
+  await invalidateUserCache(clientId).catch(() => {});
+  await CacheInvalidator.onRecordUpdate('user', clientId);
+
   return result;
+};
+
+// -------------------------------------------------------
+// get all Organizers — ADMIN / SUPERADMIN
+// -------------------------------------------------------
+const getAllOrganizersFromDB = async (
+  req: Request,
+  options: IPaginationOptions,
+  filters: IUserFilterRequest,
+) => {
+  const { page, limit, skip } = paginationHelper.calculatePagination(options);
+  const { searchTerm, ...filterData } = filters;
+
+  const andConditions: Prisma.UserWhereInput[] = [];
+
+  andConditions.push({
+    role: UserRoleEnum.ORGINIZER,
+    isDeleted: false,
+  });
+
+  if (searchTerm) {
+    andConditions.push({
+      OR: [
+        { fullName: { contains: searchTerm, mode: 'insensitive' } },
+        { email: { contains: searchTerm, mode: 'insensitive' } },
+        {
+          location: {
+            locationName: { contains: searchTerm, mode: 'insensitive' },
+          },
+        },
+      ],
+    });
+  }
+
+  if (filterData.status) {
+    andConditions.push({
+      status: filterData.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED',
+    });
+  }
+
+  const whereConditions: Prisma.UserWhereInput =
+    andConditions.length > 0
+      ? { AND: andConditions }
+      : { role: UserRoleEnum.ORGINIZER };
+
+  const cacheKey = await CacheKeys.list('user', { page, limit, searchTerm, ...filterData, scope: 'organizers' });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [users, total, driverCounts, requestCounts] = await Promise.all([
+      prisma.user.findMany({
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phoneNumber: true,
+          status: true,
+          companyLocation: true,
+          createdAt: true,
+          location: {
+            select: {
+              id: true,
+              locationName: true,
+            },
+          },
+        },
+      }),
+      prisma.user.count({ where: whereConditions }),
+      prisma.user.groupBy({
+        by: ['organizerId'],
+        where: {
+          organizerId: { not: null },
+          isDeleted: false,
+        },
+        _count: { id: true },
+      }),
+      prisma.organizerRequest.groupBy({
+        by: ['userId'],
+        where: {
+          isDeleted: false,
+        },
+        _count: { id: true },
+      }),
+    ]);
+
+    const driverCountMap = Object.fromEntries(
+      driverCounts.map(d => [d.organizerId, d._count.id]),
+    );
+    const requestCountMap = Object.fromEntries(
+      requestCounts.map(r => [r.userId, r._count.id]),
+    );
+
+    const data = users.map(user => ({
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      phoneNumber: user.phoneNumber,
+      status: user.status,
+      companyLocation: user.companyLocation,
+      joinDate: user.createdAt,
+      location: user.location?.locationName ?? null,
+      driverCount: driverCountMap[user.id] ?? 0,
+      requestCount: requestCountMap[user.id] ?? 0,
+    }));
+
+    return {
+      meta: {
+        total,
+        page,
+        limit,
+      },
+      data,
+    };
+  });
+
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // -------------------------------------------------------
@@ -1076,7 +1525,8 @@ export const UserServices = {
   createClinicIntoDB,
   getAllClinicsFromDB,
   updateClinicIntoDB,
-  //org
+  //organizer
+  getAllOrganizersFromDB,
   createOrgDriverIntoDB,
   getAllOrgDriverFromDB,
   getAllOrgDriverReportsFromDB,

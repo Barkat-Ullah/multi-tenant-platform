@@ -30,6 +30,10 @@ model OrganizerRequest {
     drivers          OrganizerRequestDriver[]
     medicalRecords   MedicalRecord[]
 
+    @@index([userId])
+    @@index([clinicId])
+    @@index([status])
+    @@index([isDeleted])
     @@map("OrganizerRequest")
 }
 

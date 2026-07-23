@@ -12,6 +12,8 @@ import emailSender, {
   medicalRecordUploadedDriverEmail,
   medicalRecordUploadedOrganizerEmail,
 } from '../../utils/sendMail';
+import { mailQueue } from '../../helpers/queue';
+import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
 
 type IMedicalRecordFilterRequest = {
   searchTerm?: string;
@@ -196,6 +198,13 @@ const createMedicalRecord = async (req: Request) => {
   // ----------------------------------------------------------
   // STEP 6: Fetch users for notifications (parallel)
   // ----------------------------------------------------------
+  // Cross-model: invalidate medical record + related booking caches
+  await Promise.all([
+    CacheInvalidator.onRecordCreate('medicalRecord'),
+    data.bookingId
+      ? CacheInvalidator.onRelatedChangeFull('booking')
+      : Promise.resolve(),
+  ]);
   const [driver, clinic, organizer] = await Promise.all([
     prisma.user.findUnique({
       where: { id: driverId },
@@ -235,17 +244,18 @@ const createMedicalRecord = async (req: Request) => {
   });
 
   if (driver?.email) {
-    emailSender(
-      driver.email,
-      medicalRecordUploadedDriverEmail(
+    mailQueue.add('send-email', {
+      type: 'medical-record-driver',
+      to: driver.email,
+      html: medicalRecordUploadedDriverEmail(
         driver.fullName,
         clinicName,
         medicalRecord.id,
         recordResult,
         expiryDateStr,
       ),
-      'Your Medical Record Has Been Uploaded',
-    ).catch(err => console.error('Driver medical record mail failed:', err));
+      subject: 'Your Medical Record Has Been Uploaded',
+    }).catch(err => console.error('Driver medical record mail queue failed:', err));
   }
 
   // ----------------------------------------------------------
@@ -264,9 +274,10 @@ const createMedicalRecord = async (req: Request) => {
     });
 
     if (organizer.email) {
-      emailSender(
-        organizer.email,
-        medicalRecordUploadedOrganizerEmail(
+      mailQueue.add('send-email', {
+        type: 'medical-record-organizer',
+        to: organizer.email,
+        html: medicalRecordUploadedOrganizerEmail(
           organizer.fullName,
           driver?.fullName ?? 'Driver',
           clinicName,
@@ -274,9 +285,9 @@ const createMedicalRecord = async (req: Request) => {
           recordResult,
           expiryDateStr,
         ),
-        'Driver Medical Record Uploaded',
-      ).catch(err =>
-        console.error('Organizer medical record mail failed:', err),
+        subject: 'Driver Medical Record Uploaded',
+      }).catch(err =>
+        console.error('Organizer medical record mail queue failed:', err),
       );
     }
   }
@@ -311,18 +322,22 @@ const getMedicalRecordList = async (
   const whereConditions: Prisma.MedicalRecordWhereInput =
     andConditions.length > 0 ? { AND: andConditions } : {};
 
-  const [result, total] = await Promise.all([
-    prisma.medicalRecord.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      select: medicalRecordSelect,
-    }),
-    prisma.medicalRecord.count({ where: whereConditions }),
-  ]);
+  const cacheKey = await CacheKeys.list('medicalRecord', { page, limit, searchTerm, ...filterData });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [result, total] = await Promise.all([
+      prisma.medicalRecord.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: medicalRecordSelect,
+      }),
+      prisma.medicalRecord.count({ where: whereConditions }),
+    ]);
+    return { meta: { total, page, limit }, data: result };
+  });
 
-  return { meta: { total, page, limit }, data: result };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // -------------------------------------------------------
@@ -334,10 +349,10 @@ const getMedicalRecordById = async (req: Request) => {
   const userRole = req.user.role;
   const { id } = req.params;
 
-  const result = await prisma.medicalRecord.findUnique({
-    where: { id },
-    select: medicalRecordSelect,
-  });
+  const cacheKey = await CacheKeys.single('medicalRecord', id);
+  const result = await cacheOr(cacheKey, TTL.MEDIUM, () =>
+    prisma.medicalRecord.findUnique({ where: { id }, select: medicalRecordSelect }),
+  );
 
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'MedicalRecord not found');
@@ -419,18 +434,22 @@ const getMyMedicalRecord = async (
     AND: andConditions,
   };
 
-  const [result, total] = await Promise.all([
-    prisma.medicalRecord.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      select: medicalRecordSelect,
-    }),
-    prisma.medicalRecord.count({ where: whereConditions }),
-  ]);
+  const cacheKey = await CacheKeys.myList('medicalRecord', userId, { page, limit, searchTerm, ...filterData });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [result, total] = await Promise.all([
+      prisma.medicalRecord.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: medicalRecordSelect,
+      }),
+      prisma.medicalRecord.count({ where: whereConditions }),
+    ]);
+    return { meta: { total, page, limit }, data: result };
+  });
 
-  return { meta: { total, page, limit }, data: result };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // -------------------------------------------------------
@@ -473,6 +492,7 @@ const updateMedicalRecord = async (req: Request) => {
     select: medicalRecordSelect,
   });
 
+  await CacheInvalidator.onRecordUpdate('medicalRecord', id);
   return result;
 };
 
@@ -486,7 +506,9 @@ const deleteMedicalRecord = async (id: string) => {
   if (!existingRecord) {
     throw new ApiError(httpStatus.NOT_FOUND, 'MedicalRecord not found');
   }
-  return await prisma.medicalRecord.delete({ where: { id } });
+  const result = await prisma.medicalRecord.delete({ where: { id } });
+  await CacheInvalidator.onRecordDelete('medicalRecord', id);
+  return result;
 };
 
 export const medicalRecordService = {

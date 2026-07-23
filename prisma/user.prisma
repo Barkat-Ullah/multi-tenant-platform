@@ -77,6 +77,11 @@ model User {
   ticketMessages         TicketMessage[]          @relation("TicketMessageSender")
   ticketStatusLogs       TicketStatusLog[]        @relation("TicketStatusChangedBy")
 
+  @@index([organizerId])
+  @@index([role])
+  @@index([status])
+  @@index([isDeleted])
+  @@index([createdById])
   @@map("users")
 }
 
@@ -129,6 +134,7 @@ model SocialAccount {
   @@index([userId])
   @@map("social_accounts")
 }
+
 
 enum SocialProviderEnum {
   GOOGLE

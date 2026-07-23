@@ -174,6 +174,7 @@ export async function setupWebSocket(server: Server) {
             const chats = await prisma.chat.findMany({
               where: { roomId: room.id },
               orderBy: { createdAt: 'asc' },
+              take: 200,
             });
 
             await prisma.chat.updateMany({
@@ -216,6 +217,7 @@ export async function setupWebSocket(server: Server) {
             const chats = await prisma.chat.findMany({
               where: { roomId: room.id },
               orderBy: { createdAt: 'asc' },
+              take: 200,
             });
 
             await prisma.chat.updateMany({
@@ -274,6 +276,7 @@ export async function setupWebSocket(server: Server) {
 
             const unReadMessages = await prisma.chat.findMany({
               where: { roomId: room.id, isRead: false, receiverId: ws.userId },
+              take: 100,
             });
 
             const unReadCount = unReadMessages.length;
@@ -315,6 +318,7 @@ export async function setupWebSocket(server: Server) {
 
             const unReadMessages = await prisma.chat.findMany({
               where: { roomId: room.id, isRead: false, receiverId: ws.userId },
+              take: 100,
             });
 
             const unReadCount = unReadMessages.length;
@@ -334,6 +338,7 @@ export async function setupWebSocket(server: Server) {
                 where: {
                   OR: [{ senderId: ws.userId }, { receiverId: ws.userId }],
                 },
+                take: 100,
                 include: {
                   chat: {
                     orderBy: {

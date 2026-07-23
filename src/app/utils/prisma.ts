@@ -1,18 +1,15 @@
 import { PrismaClient } from '@prisma/client';
+
+// Single PrismaClient instance — no omit clauses.
+// All queries that need sensitive fields (password, otp) must use explicit `select`.
+// This eliminates the duplicate connection pool and memory overhead of two clients.
 const prismaClient = new PrismaClient({
-  omit: {
-    user: {
-      password: true,
-      otp: true,
-      otpExpiry: true,
-      isEmailVerified: true,
-      isAgreeWithTerms: true,
-    },
-  },
+  log: process.env.NODE_ENV === 'development'
+    ? ['error', 'warn']
+    : ['error'],
 });
 
 export const prisma = prismaClient;
-export const insecurePrisma = new PrismaClient();
 
 process.on('SIGINT', async () => {
   await prisma.$disconnect();

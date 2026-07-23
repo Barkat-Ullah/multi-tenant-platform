@@ -28,6 +28,19 @@ const getAllClinics = catchAsync(async (req, res) => {
   });
 });
 
+//organizer
+const getAllOrganizers = catchAsync(async (req, res) => {
+  const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
+  const filters = pick(req.query, getFilterableFields);
+  const result = await UserServices.getAllOrganizersFromDB(req, options, filters);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Organizers retrieved successfully',
+    ...result,
+  });
+});
+
 //org
 const getAllOrgDriver = catchAsync(async (req, res) => {
   const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
@@ -81,8 +94,8 @@ const getMyimage = catchAsync(async (req, res) => {
 });
 
 const getUserDetails = catchAsync(async (req, res) => {
-  const { id } = req.params;
-  const result = await UserServices.getUserDetailsFromDB(id);
+
+  const result = await UserServices.getUserDetailsFromDB(req);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -231,7 +244,8 @@ export const UserControllers = {
   createClinic,
   getAllClinics,
   updateClinic,
-  //org
+  //organizer
+  getAllOrganizers,
   createOrgDriver,
   getAllOrgDriver,
   getAllOrgDriverReports,

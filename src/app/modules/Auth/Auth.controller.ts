@@ -19,7 +19,7 @@ const registerWithOtp = catchAsync(async (req, res) => {
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
-    message: 'User Created Successfully',
+    message: result.message,
     data: result,
   });
 });

@@ -5,6 +5,7 @@ import { IPaginationOptions } from '../../interface/pagination.type';
 import { paginationHelper } from '../../utils/calculatePagination';
 import ApiError from '../../errors/AppError';
 import { Request } from 'express';
+import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
 
 // -------------------------------------------------------
 // SELECT — auto-generated from Prisma model fields
@@ -12,6 +13,7 @@ import { Request } from 'express';
 const paymentSelect = {
   id: true,
   userId: true,
+  bookingId: true,
   amount: true,
   currency: true,
   status: true,
@@ -31,7 +33,26 @@ const paymentSelect = {
 // create Payment
 // -------------------------------------------------------
 const createPayment = async (req: Request) => {
-  console.log('')
+  const { userId, bookingId, amount, currency, paymentMethodType } = req.body;
+
+  if (!userId || !amount) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'userId and amount are required');
+  }
+
+  const result = await prisma.payment.create({
+    data: {
+      userId,
+      bookingId: bookingId || null,
+      amount,
+      currency: currency || 'usd',
+      status: 'PENDING',
+      paymentMethodType: paymentMethodType || 'Stripe',
+    },
+    select: paymentSelect,
+  });
+
+  await CacheInvalidator.onRecordCreate('payment');
+  return result;
 };
 
 // -------------------------------------------------------
@@ -103,27 +124,30 @@ const getPaymentList = async (
   const whereConditions: Prisma.PaymentWhereInput =
     andConditions.length > 0 ? { AND: andConditions } : {};
 
-  const result = await prisma.payment.findMany({
-    skip,
-    take: limit,
-    where: whereConditions,
-    orderBy: { createdAt: 'desc' },
-    select: paymentSelect,
+  const cacheKey = await CacheKeys.list('payment', { page, limit, searchTerm, ...filterData });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const result = await prisma.payment.findMany({
+      skip,
+      take: limit,
+      where: whereConditions,
+      orderBy: { createdAt: 'desc' },
+      select: paymentSelect,
+    });
+    const total = await prisma.payment.count({ where: whereConditions });
+    return { meta: { total, page, limit }, data: result };
   });
 
-  const total = await prisma.payment.count({ where: whereConditions });
-
-  return { meta: { total, page, limit }, data: result };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // -------------------------------------------------------
 // get Payment by id
 // -------------------------------------------------------
 const getPaymentById = async (id: string) => {
-  const result = await prisma.payment.findUnique({
-    where: { id },
-    select: paymentSelect,
-  });
+  const cacheKey = await CacheKeys.single('payment', id);
+  const result = await cacheOr(cacheKey, TTL.MEDIUM, () =>
+    prisma.payment.findUnique({ where: { id }, select: paymentSelect }),
+  );
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Payment not found');
   }
@@ -191,17 +215,20 @@ const getMyPayment = async (
 
   const whereConditions: Prisma.PaymentWhereInput = { AND: andConditions };
 
-  const result = await prisma.payment.findMany({
-    skip,
-    take: limit,
-    where: whereConditions,
-    orderBy: { createdAt: 'desc' },
-    select: paymentSelect,
+  const cacheKey = await CacheKeys.myList('payment', userId, { page, limit, searchTerm, ...filterData });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const result = await prisma.payment.findMany({
+      skip,
+      take: limit,
+      where: whereConditions,
+      orderBy: { createdAt: 'desc' },
+      select: paymentSelect,
+    });
+    const total = await prisma.payment.count({ where: whereConditions });
+    return { meta: { total, page, limit }, data: result };
   });
 
-  const total = await prisma.payment.count({ where: whereConditions });
-
-  return { meta: { total, page, limit }, data: result };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // -------------------------------------------------------
@@ -238,6 +265,7 @@ const updatePayment = async (req: Request) => {
     select: paymentSelect,
   });
 
+  await CacheInvalidator.onRecordUpdate('payment', id);
   return result;
 };
 
@@ -250,16 +278,15 @@ const toggleStatusPayment = async (id: string) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Payment not found');
   }
 
-  // TODO: define your status enum toggle logic below
-  // Example for enum: { ACTIVE -> INACTIVE, INACTIVE -> ACTIVE }
   const currentStatus = (existingPayment as any).status;
-  // const newStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+  const newStatus = currentStatus === 'PENDING' ? 'SUCCESS' : 'PENDING';
   const result = await prisma.payment.update({
     where: { id },
-    data: { status: currentStatus /* replace with newStatus */ },
+    data: { status: newStatus },
     select: paymentSelect,
   });
 
+  await CacheInvalidator.onRecordUpdate('payment', id);
   return result;
 };
 
@@ -267,19 +294,18 @@ const toggleStatusPayment = async (id: string) => {
 // soft delete Payment
 // -------------------------------------------------------
 const softDeletePayment = async (id: string) => {
-  const existingPayment = await prisma.payment.findUnique({ where: { id } });
-  if (!existingPayment) {
+  const existing = await prisma.payment.findUnique({ where: { id } });
+  if (!existing) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Payment not found');
   }
-  if ((existingPayment as any).isDeleted) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Payment is already deleted');
-  }
+
   const result = await prisma.payment.update({
     where: { id },
-    // data: { isDeleted: true },
-    data: {},
+    data: { status: 'CANCELED' },
     select: paymentSelect,
   });
+
+  await CacheInvalidator.onRecordUpdate('payment', id);
   return result;
 };
 
@@ -287,11 +313,8 @@ const softDeletePayment = async (id: string) => {
 // hard delete Payment
 // -------------------------------------------------------
 const deletePayment = async (id: string) => {
-  const existingPayment = await prisma.payment.findUnique({ where: { id } });
-  if (!existingPayment) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Payment not found');
-  }
   const result = await prisma.payment.delete({ where: { id } });
+  await CacheInvalidator.onRecordDelete('payment', id);
   return result;
 };
 

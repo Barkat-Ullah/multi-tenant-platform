@@ -11,8 +11,8 @@
 /**
  * 1. POST /api/v1/tickets
  *    - Create a new support ticket
- *    - Auth: USER, ORGINIZER, CLINIC
- *    - Body:
+ *    - Auth: USER, ORGINIZER, CLINIC, ADMIN, SUPERADMIN
+ *    - Body (regular user):
  *      {
  *        "subject": "Booking issue with time slot",
  *        "description": "I cannot book the time slot that shows available",
@@ -20,6 +20,18 @@
  *        "priority": "MEDIUM", // optional: LOW, MEDIUM, HIGH, URGENT
  *        "relatedBookingId": "booking_123" // optional
  *      }
+ *    - Body (admin/superadmin on behalf of another user):
+ *      {
+ *        "subject": "Issue with account access",
+ *        "description": "Driver is unable to log in to the system",
+ *        "category": "ACCOUNT_ISSUE",
+ *        "priority": "HIGH",
+ *        "createdById": "65f8a1b2c3d4e5f6a7b8c9d0" // optional — target user's ID
+ *      }
+ *    - Note: When ADMIN/SUPERADMIN provides "createdById", the ticket is created
+ *      as if that user created it (the ticket is attributed to them, they receive
+ *      the email notification, and the initial message is sent on their behalf).
+ *      If omitted, the ticket is created for the authenticated admin.
  *    - Response: Created ticket with ticketNumber (e.g., TKT-00001)
  *    - Note: Booking validation is atomic (inside transaction) to prevent race conditions
  *    - Note: In-app notifications + emails sent to all admins on creation
@@ -122,9 +134,9 @@
 // EXAMPLE REQUESTS
 // ============================================================
 
-// Create Ticket
+// Create Ticket (regular user)
 /*
-curl -X POST http://localhost:5000/api/v1/tickets \
+curl -X POST http://localhost:5002/api/v1/tickets \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -135,21 +147,35 @@ curl -X POST http://localhost:5000/api/v1/tickets \
   }'
 */
 
+// Create Ticket (admin/superadmin on behalf of another user)
+/*
+curl -X POST http://localhost:5002/api/v1/tickets \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject": "Driver unable to complete booking",
+    "description": "The driver reported the payment screen is stuck after selecting a slot. Creating ticket on their behalf.",
+    "category": "BOOKING_ISSUE",
+    "priority": "URGENT",
+    "createdById": "65f8a1b2c3d4e5f6a7b8c9d0"
+  }'
+*/
+
 // List Tickets (Admin) with cross-entity search
 /*
-curl -X GET "http://localhost:5000/api/v1/tickets?searchTerm=John&status=OPEN&priority=URGENT" \
+curl -X GET "http://localhost:5002/api/v1/tickets?searchTerm=John&status=OPEN&priority=URGENT" \
   -H "Authorization: Bearer <admin_token>"
 */
 
 // Get Ticket Detail with paginated messages
 /*
-curl -X GET "http://localhost:5000/api/v1/tickets/ticket_id?messagePage=1&messageLimit=50" \
+curl -X GET "http://localhost:5002/api/v1/tickets/ticket_id?messagePage=1&messageLimit=50" \
   -H "Authorization: Bearer <token>"
 */
 
 // Reply to Ticket
 /*
-curl -X POST http://localhost:5000/api/v1/tickets/ticket_id/messages \
+curl -X POST http://localhost:5002/api/v1/tickets/ticket_id/messages \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -160,7 +186,7 @@ curl -X POST http://localhost:5000/api/v1/tickets/ticket_id/messages \
 
 // Add Internal Note (Staff only)
 /*
-curl -X POST http://localhost:5000/api/v1/tickets/ticket_id/messages \
+curl -X POST http://localhost:5002/api/v1/tickets/ticket_id/messages \
   -H "Authorization: Bearer <staff_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -171,12 +197,12 @@ curl -X POST http://localhost:5000/api/v1/tickets/ticket_id/messages \
 
 // Get Analytics
 /*
-curl -X GET "http://localhost:5000/api/v1/tickets/analytics?period=monthly" \
+curl -X GET "http://localhost:5002/api/v1/tickets/analytics?period=monthly" \
   -H "Authorization: Bearer <admin_token>"
 */
 
 // Get Analytics with custom date range
 /*
-curl -X GET "http://localhost:5000/api/v1/tickets/analytics?rangeStartDay=2026-01-01&rangeEndDay=2026-06-30" \
+curl -X GET "http://localhost:5002/api/v1/tickets/analytics?rangeStartDay=2026-01-01&rangeEndDay=2026-06-30" \
   -H "Authorization: Bearer <admin_token>"
 */

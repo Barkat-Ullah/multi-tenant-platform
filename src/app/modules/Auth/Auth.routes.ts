@@ -4,26 +4,30 @@ import { UserRoleEnum } from '@prisma/client';
 import { AuthControllers } from '../Auth/Auth.controller';
 import validateRequest from '../../middlewares/validateRequest';
 import { authValidation } from './Auth.validation';
+import { authLimiter } from '../../../shared';
 
 const router = express.Router();
 
 router.post(
   '/login',
-  // validateRequest.body(authValidation.loginUser),
+  authLimiter,
+  validateRequest(authValidation.loginUser),
   AuthControllers.loginWithOtp,
 );
 
 router.post(
   '/register',
+  authLimiter,
   validateRequest(authValidation.registerSchema),
   AuthControllers.registerWithOtp,
 );
 router.post('/logout', AuthControllers.logoutUser);
 
-router.post('/verify-email-with-otp', AuthControllers.verifyOtpCommon);
+router.post('/verify-email-with-otp', authLimiter, AuthControllers.verifyOtpCommon);
 
 router.post(
   '/resend-verification-with-otp',
+  authLimiter,
   AuthControllers.resendVerificationWithOtp,
 );
 
@@ -35,13 +39,15 @@ router.post(
 
 router.post(
   '/forget-password',
-  // validateRequest.body(authValidation.forgetPasswordValidationSchema),
+  authLimiter,
+  validateRequest(authValidation.forgetPasswordValidationSchema),
   AuthControllers.forgetPassword,
 );
 
 router.post(
   '/reset-password',
-  // validateRequest.body(authValidation.resetPasswordValidationSchema),
+  authLimiter,
+  validateRequest(authValidation.resetPasswordValidationSchema),
   AuthControllers.resetPassword,
 );
 

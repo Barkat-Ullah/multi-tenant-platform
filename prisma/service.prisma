@@ -14,5 +14,7 @@ model Service {
     bookings          Booking[]
     organizerRequests OrganizerRequest[]
 
+    @@index([userId])
+    @@index([isDeleted])
     @@map("services")
 }

@@ -8,6 +8,7 @@ import { Request } from 'express';
 import { handleFileUploads } from '../../utils/handleFile';
 import { serviceSelect } from './service.select';
 import { buildFilterConditions } from './service.utils';
+import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
 
 // -------------------------------------------------------
 // create Service
@@ -25,6 +26,8 @@ const createService = async (req: Request) => {
     data: addedData,
     select: serviceSelect,
   });
+
+  await CacheInvalidator.onRecordCreate('service');
   return result;
 };
 
@@ -65,18 +68,22 @@ const getServiceList = async (
   const whereConditions: Prisma.ServiceWhereInput =
     andConditions.length > 0 ? { AND: andConditions } : {};
 
-  const [result, total] = await Promise.all([
-    prisma.service.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      select: serviceSelect,
-    }),
-    prisma.service.count({ where: whereConditions }),
-  ]);
+  const cacheKey = await CacheKeys.list('service', { page, limit, searchTerm, ...filterData });
+  const cached = await cacheOr(cacheKey, TTL.LONG, async () => {
+    const [result, total] = await Promise.all([
+      prisma.service.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: serviceSelect,
+      }),
+      prisma.service.count({ where: whereConditions }),
+    ]);
+    return { meta: { total, page, limit }, data: result };
+  });
 
-  return { meta: { total, page, limit }, data: result };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // -------------------------------------------------------
@@ -85,42 +92,44 @@ const getServiceList = async (
 const getServiceById = async (req: Request) => {
   const { id } = req.params;
 
-  const result = await prisma.service.findUnique({
-    where: { id },
-    select: {
-      ...serviceSelect,
-      clinicServices: {
-        select: {
-          clinicId: true,
-          clinic: {
-            select: {
-              id: true,
-              fullName: true,
-              email: true,
-              phoneNumber: true,
-              status: true,
-              clinicGmcNumber: true,
-              isParking: true,        // ← User field, accessed via clinic relation
-              location: {
-                select: {
-                  id: true,
-                  locationName: true,
-                  lat: true,
-                  lng: true,
+  const cacheKey = await CacheKeys.single('service', id);
+  const result = await cacheOr(cacheKey, TTL.LONG, () =>
+    prisma.service.findUnique({
+      where: { id },
+      select: {
+        ...serviceSelect,
+        clinicServices: {
+          select: {
+            clinicId: true,
+            clinic: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                phoneNumber: true,
+                status: true,
+                clinicGmcNumber: true,
+                isParking: true,
+                location: {
+                  select: {
+                    id: true,
+                    locationName: true,
+                    lat: true,
+                    lng: true,
+                  },
                 },
               },
             },
           },
         },
       },
-    },
-  });
+    }),
+  );
 
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Service not found');
   }
 
-  // flatten clinics out of the junction
   return {
     ...result,
     clinics: result.clinicServices.map(cs => cs.clinic),
@@ -156,18 +165,22 @@ const getMyService = async (
 
   const whereConditions: Prisma.ServiceWhereInput = { AND: andConditions };
 
-  const [result, total] = await Promise.all([
-    prisma.service.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      select: serviceSelect,
-    }),
-    prisma.service.count({ where: whereConditions }),
-  ]);
+  const cacheKey = await CacheKeys.list('service', { page, limit, searchTerm, ...filterData, scope: 'my' });
+  const cached = await cacheOr(cacheKey, TTL.LONG, async () => {
+    const [result, total] = await Promise.all([
+      prisma.service.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: serviceSelect,
+      }),
+      prisma.service.count({ where: whereConditions }),
+    ]);
+    return { meta: { total, page, limit }, data: result };
+  });
 
-  return { meta: { total, page, limit }, data: result };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // -------------------------------------------------------
@@ -197,13 +210,29 @@ const updateService = async (req: Request) => {
     select: serviceSelect,
   });
 
+  await CacheInvalidator.onRecordUpdate('service', id);
   return result;
 };
 
 // -------------------------------------------------------
 // toggle status Service
 // -------------------------------------------------------
-const toggleStatusService = async (id: string) => {};
+const toggleStatusService = async (id: string) => {
+  const existingService = await prisma.service.findUnique({ where: { id } });
+  if (!existingService) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Service not found');
+  }
+
+  const currentStatus = (existingService as any).isDeleted;
+  const result = await prisma.service.update({
+    where: { id },
+    data: { isDeleted: !currentStatus },
+    select: serviceSelect,
+  });
+
+  await CacheInvalidator.onRecordUpdate('service', id);
+  return result;
+};
 
 // -------------------------------------------------------
 // soft delete Service
@@ -224,6 +253,8 @@ const softDeleteService = async (id: string) => {
     data: { isDeleted: true },
     select: serviceSelect,
   });
+
+  await CacheInvalidator.onRecordUpdate('service', id);
   return result;
 };
 
@@ -236,6 +267,7 @@ const deleteService = async (id: string) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Service not found');
   }
   const result = await prisma.service.delete({ where: { id } });
+  await CacheInvalidator.onRecordDelete('service', id);
   return result;
 };
 

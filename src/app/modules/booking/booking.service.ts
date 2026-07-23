@@ -30,6 +30,14 @@ import emailSender, {
   bookingCreatedClinicEmail,
   bookingCreatedDriverEmail,
 } from '../../utils/sendMail';
+import { mailQueue } from '../../helpers/queue';
+import {
+  getDateRangeByPeriod,
+  getCustomDateRange,
+  normalizeCalendarPeriod,
+  CalendarPeriod,
+} from '../../utils/dateRange';
+import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
 
 type IBookingFilterRequest = {
   searchTerm?: string;
@@ -42,140 +50,6 @@ type IBookingFilterRequest = {
   period?: string; // daily, weekly, monthly (current day, week, month)
   rangeStartDay?: string; // ISO date string
   rangeEndDay?: string; // ISO date string
-};
-
-type CalendarPeriod = 'daily' | 'weekly' | 'monthly';
-
-const getDateRangeByPeriod = (period: CalendarPeriod) => {
-  const now = new Date();
-
-  if (period === 'daily') {
-    return {
-      rangeStart: new Date(
-        Date.UTC(
-          now.getUTCFullYear(),
-          now.getUTCMonth(),
-          now.getUTCDate(),
-          0,
-          0,
-          0,
-          0,
-        ),
-      ),
-      rangeEnd: new Date(
-        Date.UTC(
-          now.getUTCFullYear(),
-          now.getUTCMonth(),
-          now.getUTCDate(),
-          23,
-          59,
-          59,
-          999,
-        ),
-      ),
-    };
-  }
-
-  if (period === 'weekly') {
-    const utcDay = now.getUTCDay();
-    const diffToMonday = utcDay === 0 ? 6 : utcDay - 1;
-
-    const rangeStart = new Date(
-      Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate() - diffToMonday,
-        0,
-        0,
-        0,
-        0,
-      ),
-    );
-
-    return {
-      rangeStart,
-      rangeEnd: new Date(
-        Date.UTC(
-          rangeStart.getUTCFullYear(),
-          rangeStart.getUTCMonth(),
-          rangeStart.getUTCDate() + 6,
-          23,
-          59,
-          59,
-          999,
-        ),
-      ),
-    };
-  }
-
-  return {
-    rangeStart: new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
-    ),
-    rangeEnd: new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
-    ),
-  };
-};
-
-// NEW: parse custom range from query params, validate as full UTC days
-const getCustomDateRange = (rangeStartDay: string, rangeEndDay: string) => {
-  const start = new Date(rangeStartDay);
-  const end = new Date(rangeEndDay);
-
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      'Invalid rangeStartDay or rangeEndDay format. Use YYYY-MM-DD.',
-    );
-  }
-
-  if (start > end) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      'rangeStartDay cannot be after rangeEndDay',
-    );
-  }
-
-  const rangeStart = new Date(
-    Date.UTC(
-      start.getUTCFullYear(),
-      start.getUTCMonth(),
-      start.getUTCDate(),
-      0,
-      0,
-      0,
-      0,
-    ),
-  );
-
-  const rangeEnd = new Date(
-    Date.UTC(
-      end.getUTCFullYear(),
-      end.getUTCMonth(),
-      end.getUTCDate(),
-      23,
-      59,
-      59,
-      999,
-    ),
-  );
-
-  return { rangeStart, rangeEnd };
-};
-
-const normalizeCalendarPeriod = (period?: string): CalendarPeriod => {
-  const normalized = period?.toLowerCase();
-
-  if (
-    normalized === 'daily' ||
-    normalized === 'weekly' ||
-    normalized === 'monthly'
-  ) {
-    return normalized;
-  }
-
-  return 'weekly';
 };
 
 const organizerRequestSelect = {
@@ -240,7 +114,7 @@ const createBooking = async (req: Request) => {
   }
 
   // When admin books, they must provide a clientId; otherwise use the authenticated user
-  const driverId = isAdmin ? adminId : req.user.id;
+  const driverId = isAdmin ? (req.body.clientId || adminId) : req.user.id;
 
   const admins = await getAdminAndSuperAdminEmails();
 
@@ -403,26 +277,32 @@ const createBooking = async (req: Request) => {
     },
   );
 
+  // Cross-model invalidation: booking + payment + timeSlot + notification
+  await Promise.all([
+    CacheInvalidator.onRecordCreate('booking'),
+    CacheInvalidator.onRecordCreate('payment'),
+    CacheInvalidator.onRelatedChange('timeSlot'),
+    CacheInvalidator.onRelatedChange('notification'),
+  ]);
+
   // -------------------------------------------------------
-  // Send booking created emails (Awaited sequentially/parallelly to secure Vercel execution)
+  // Queue booking created emails via BullMQ (non-blocking)
   // -------------------------------------------------------
   const bookingDateStr = new Date(scheduledAt).toDateString();
-  const mailPromises: Promise<any>[] = [];
 
   if (driver?.email) {
-    mailPromises.push(
-      emailSender(
-        driver.email,
-        bookingCreatedDriverEmail(
-          driver.fullName,
-          clinic.fullName,
-          booking.id,
-          bookingDateStr,
-          `${timeSlot.startTime} - ${timeSlot.endTime}`,
-        ),
-        'Booking Created – Complete Payment to Confirm',
-      ).catch(err => console.error('Driver booking mail failed:', err)),
-    );
+    mailQueue.add('send-email', {
+      type: 'booking-created-driver',
+      to: driver.email,
+      html: bookingCreatedDriverEmail(
+        driver.fullName,
+        clinic.fullName,
+        booking.id,
+        bookingDateStr,
+        `${timeSlot.startTime} - ${timeSlot.endTime}`,
+      ),
+      subject: 'Booking Created – Complete Payment to Confirm',
+    }).catch(err => console.error('Driver booking mail queue failed:', err));
   }
 
   const clinicUser = await prisma.user.findUnique({
@@ -431,38 +311,32 @@ const createBooking = async (req: Request) => {
   });
 
   if (clinicUser?.email) {
-    mailPromises.push(
-      emailSender(
-        clinicUser.email,
-        bookingCreatedClinicEmail(
-          clinicUser.fullName,
-          booking.id,
-          bookingDateStr,
-          `${timeSlot.startTime} - ${timeSlot.endTime}`,
-        ),
-        'New Booking Received',
-      ).catch(err => console.error('Clinic booking mail failed:', err)),
-    );
+    mailQueue.add('send-email', {
+      type: 'booking-created-clinic',
+      to: clinicUser.email,
+      html: bookingCreatedClinicEmail(
+        clinicUser.fullName,
+        booking.id,
+        bookingDateStr,
+        `${timeSlot.startTime} - ${timeSlot.endTime}`,
+      ),
+      subject: 'New Booking Received',
+    }).catch(err => console.error('Clinic booking mail queue failed:', err));
   }
 
   for (const admin of admins) {
-    mailPromises.push(
-      emailSender(
-        admin.email,
-        bookingCreatedAdminEmail(
-          admin.fullName,
-          driver?.fullName ?? 'N/A',
-          clinic.fullName,
-          booking.id,
-          bookingDateStr,
-        ),
-        'New Booking Created',
-      ).catch(err => console.error('Admin booking mail failed:', err)),
-    );
-  }
-
-  if (mailPromises.length > 0) {
-    await Promise.all(mailPromises);
+    mailQueue.add('send-email', {
+      type: 'booking-created-admin',
+      to: admin.email,
+      html: bookingCreatedAdminEmail(
+        admin.fullName,
+        driver?.fullName ?? 'N/A',
+        clinic.fullName,
+        booking.id,
+        bookingDateStr,
+      ),
+      subject: 'New Booking Created',
+    }).catch(err => console.error('Admin booking mail queue failed:', err));
   }
 
   // -------------------------------------------------------
@@ -593,6 +467,13 @@ const verifyStripePayment = async (req: Request) => {
     { timeout: 15000 },
   );
 
+  // Cross-model invalidation: booking + payment + notification caches
+  await Promise.all([
+    CacheInvalidator.onRecordUpdate('booking', bookingId),
+    CacheInvalidator.onRecordUpdate('payment', paymentId),
+    CacheInvalidator.onRelatedChange('notification'),
+  ]);
+
   const stripeBooking = await prisma.booking.findUnique({
     where: { id: bookingId },
     select: { driverId: true },
@@ -686,6 +567,13 @@ const verifyPaypalPayment = async (req: Request) => {
     { timeout: 15000 },
   );
 
+  // Cross-model invalidation: booking + payment + notification caches
+  await Promise.all([
+    CacheInvalidator.onRecordUpdate('booking', payment.bookingId as string),
+    CacheInvalidator.onRecordUpdate('payment', payment.id),
+    CacheInvalidator.onRelatedChange('notification'),
+  ]);
+
   await sendPaymentSuccessMails(
     payment.bookingId,
     payment.userId,
@@ -725,30 +613,35 @@ const getBookingListForAdminAndSuperAdmin = async (
   const whereConditions: Prisma.BookingWhereInput =
     andConditions.length > 0 ? { AND: andConditions } : {};
 
-  const [result, total, confirmed, pending, cancelled] = await Promise.all([
-    prisma.booking.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      select: bookingSelect,
-    }),
-    prisma.booking.count({ where: whereConditions }),
-    prisma.booking.count({ where: { status: BookingStatus.CONFIRMED } }),
-    prisma.booking.count({ where: { status: BookingStatus.PENDING } }),
-    prisma.booking.count({ where: { status: BookingStatus.CANCELLED } }),
-  ]);
+  const cacheKey = await CacheKeys.list('booking', { page, limit, searchTerm, ...filterData, scope: 'admin' });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [result, total, confirmed, pending, cancelled] = await Promise.all([
+      prisma.booking.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: bookingSelect,
+      }),
+      prisma.booking.count({ where: whereConditions }),
+      prisma.booking.count({ where: { status: BookingStatus.CONFIRMED } }),
+      prisma.booking.count({ where: { status: BookingStatus.PENDING } }),
+      prisma.booking.count({ where: { status: BookingStatus.CANCELLED } }),
+    ]);
 
-  return {
-    meta: { total, page, limit, confirmed, pending, cancelled },
-    data: result,
-  };
+    return {
+      meta: { total, page, limit, confirmed, pending, cancelled },
+      data: result,
+    };
+  });
+
+  return cached ?? { meta: { total: 0, page, limit, confirmed: 0, pending: 0, cancelled: 0 }, data: [] };
 };
 
 // -------------------------------------------------------
 
 // -------------------------------------------------------
-const getBookingListCallenderForAdminAndSuperAdminClinic = async (
+const getBookingListCalendarForAdminAndSuperAdminClinic = async (
   req: Request,
   options: IPaginationOptions,
   filters: IBookingFilterRequest,
@@ -925,10 +818,10 @@ const getBookingById = async (req: Request) => {
   const userId = req.user.id;
   const userRole = req.user.role;
 
-  const result = await prisma.booking.findUnique({
-    where: { id },
-    select: bookingSelect,
-  });
+  const cacheKey = await CacheKeys.single('booking', id);
+  const result = await cacheOr(cacheKey, TTL.MEDIUM, () =>
+    prisma.booking.findUnique({ where: { id }, select: bookingSelect }),
+  );
 
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
@@ -985,18 +878,22 @@ const getMyBooking = async (
 
   const whereConditions: Prisma.BookingWhereInput = { AND: andConditions };
 
-  const [result, total] = await Promise.all([
-    prisma.booking.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      select: bookingSelect,
-    }),
-    prisma.booking.count({ where: whereConditions }),
-  ]);
+  const cacheKey = await CacheKeys.myList('booking', userId, { page, limit, searchTerm, ...filterData });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [result, total] = await Promise.all([
+      prisma.booking.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: bookingSelect,
+      }),
+      prisma.booking.count({ where: whereConditions }),
+    ]);
+    return { meta: { total, page, limit }, data: result };
+  });
 
-  return { meta: { total, page, limit }, data: result };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // -------------------------------------------------------
@@ -1056,6 +953,8 @@ const updateBooking = async (req: Request) => {
     },
   });
 
+  await CacheInvalidator.onRecordUpdate('booking', id);
+
   return result;
 };
 
@@ -1075,8 +974,12 @@ const cancelBooking = async (req: Request) => {
 
   const booking = await prisma.booking.findUnique({
     where: { id },
-    include: {
-      timeSlot: true,
+    select: {
+      id: true,
+      driverId: true,
+      clinicId: true,
+      timeSlotId: true,
+      status: true,
       clinic: { select: { location: { select: { id: true } } } },
     },
   });
@@ -1120,13 +1023,16 @@ const cancelBooking = async (req: Request) => {
     // }
 
     if (booking.timeSlotId) {
-      await tx.timeSlot.update({
+      const slot = await tx.timeSlot.update({
         where: { id: booking.timeSlotId },
-        data: {
-          booked: { decrement: 1 },
-          isBooked: false,
-        },
+        data: { booked: { decrement: 1 } },
       });
+      if (slot.booked < slot.capacity) {
+        await tx.timeSlot.update({
+          where: { id: booking.timeSlotId },
+          data: { isBooked: false },
+        });
+      }
     }
 
     const updated = await tx.booking.update({
@@ -1137,7 +1043,7 @@ const cancelBooking = async (req: Request) => {
 
     if (booking.clinic.location?.id)
       await tx.location.update({
-        where: { id },
+        where: { id: booking.clinic.location.id },
         data: { totalBookings: { decrement: 1 } },
       });
 
@@ -1170,6 +1076,14 @@ const cancelBooking = async (req: Request) => {
     return updated;
   });
 
+  // Cross-model: booking + timeSlot + location + notification
+  await Promise.all([
+    CacheInvalidator.onRecordUpdate('booking', id),
+    CacheInvalidator.onRelatedChange('timeSlot'),
+    CacheInvalidator.onRelatedChange('location'),
+    CacheInvalidator.onRelatedChange('notification'),
+  ]);
+
   return result;
 };
 
@@ -1184,7 +1098,13 @@ const rescheduleBooking = async (req: Request) => {
 
   const booking = await prisma.booking.findUnique({
     where: { id },
-    include: { timeSlot: true },
+    select: {
+      id: true,
+      driverId: true,
+      clinicId: true,
+      timeSlotId: true,
+      status: true,
+    },
   });
 
   if (!booking) {
@@ -1245,26 +1165,17 @@ const rescheduleBooking = async (req: Request) => {
 
   const result = await prisma.$transaction(async tx => {
     // release old slot
-    // if (booking.timeSlotId) {
-    //   const oldSlot = await tx.timeSlot.update({
-    //     where: { id: booking.timeSlotId },
-    //     data: { booked: { decrement: 1 } },
-    //   });
-    //   if (oldSlot.booked < oldSlot.capacity) {
-    //     await tx.timeSlot.update({
-    //       where: { id: booking.timeSlotId },
-    //       data: { isBooked: false },
-    //     });
-    //   }
-    // }
     if (booking.timeSlotId) {
-      await tx.timeSlot.update({
-        where: { id: newTimeSlotId },
-        data: {
-          booked: { increment: 1 },
-          isBooked: true,
-        },
+      const oldSlot = await tx.timeSlot.update({
+        where: { id: booking.timeSlotId },
+        data: { booked: { decrement: 1 } },
       });
+      if (oldSlot.booked < oldSlot.capacity) {
+        await tx.timeSlot.update({
+          where: { id: booking.timeSlotId },
+          data: { isBooked: false },
+        });
+      }
     }
 
     // occupy new slot
@@ -1331,6 +1242,13 @@ const rescheduleBooking = async (req: Request) => {
     return updated;
   });
 
+  // Cross-model: booking + timeSlot + notification
+  await Promise.all([
+    CacheInvalidator.onRecordUpdate('booking', id),
+    CacheInvalidator.onRelatedChange('timeSlot'),
+    CacheInvalidator.onRelatedChange('notification'),
+  ]);
+
   return result;
 };
 
@@ -1390,6 +1308,12 @@ const confirmBooking = async (req: Request) => {
     return updated;
   });
 
+  // Cross-model: booking + notification
+  await Promise.all([
+    CacheInvalidator.onRecordUpdate('booking', id),
+    CacheInvalidator.onRelatedChange('notification'),
+  ]);
+
   return result;
 };
 
@@ -1402,6 +1326,7 @@ const deleteBooking = async (id: string) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Booking not found');
   }
   const result = await prisma.booking.delete({ where: { id } });
+  await CacheInvalidator.onRecordDelete('booking', id);
   return result;
 };
 
@@ -1412,7 +1337,7 @@ export const bookingService = {
   verifyStripePayment,
   //
   getBookingListForAdminAndSuperAdmin,
-  getBookingListCallenderForAdminAndSuperAdminClinic,
+  getBookingListCalendarForAdminAndSuperAdminClinic,
   getBookingById,
   getMyBooking,
   updateBooking,

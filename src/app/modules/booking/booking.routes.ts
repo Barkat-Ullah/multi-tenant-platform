@@ -79,7 +79,7 @@ router.patch(
 // driver/clinic/admin cancels a booking
 router.patch(
   '/cancel/:id',
-  auth('ANY'),
+  auth(),
   validateRequest(bookingValidation.cancelSchema),
   bookingController.cancelBooking,
 );

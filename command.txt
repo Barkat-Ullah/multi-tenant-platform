@@ -1,6 +1,110 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Multi-Tenant Medical-Compliance Platform — Command Reference
+# ═══════════════════════════════════════════════════════════════════════════════
 
-npm run generate test
+# ─── SETUP ────────────────────────────────────────────────────────────────────
 
+npm install                    # Install dependencies (triggers prisma generate)
+cp .env.example .env           # Copy env template, then fill in real values
+
+# ─── DEVELOPMENT ──────────────────────────────────────────────────────────────
+
+npm run dev                    # Start dev server on port 5002 (ts-node-dev, auto-reload)
+npm run build                  # Compile TypeScript + prisma generate
+npm start                      # Run compiled server (dist/server.js)
+
+# ─── DATABASE ─────────────────────────────────────────────────────────────────
+
+npm run pm                     # prisma migrate dev (name migration when prompted)
+npm run pg                     # prisma generate (regenerate client after schema change)
+
+# ─── CODE QUALITY ─────────────────────────────────────────────────────────────
+
+npm run lint:check             # ESLint check (JS/TS)
+npm run lint:fix               # ESLint auto-fix
+npm run prettier:fix           # Prettier format all files
+npm run prettier:check         # Prettier check (writes formatted output)
+
+# ─── MODULE GENERATOR ─────────────────────────────────────────────────────────
+
+npm run generate               # Interactive module scaffolding
 npm run generate -- test --sync
 npm run generate -- test --sync-select
 npm run generate -- test --sync-validation
+
+# ─── DOCKER ───────────────────────────────────────────────────────────────────
+
+# Build image
+docker build -t medical-compliance-api .
+
+# Run container (map port 5002, pass env vars)
+docker run -d \
+  --name medical-api \
+  -p 5002:5002 \
+  --env-file .env \
+  medical-compliance-api
+
+# View logs
+docker logs -f medical-api
+
+# Stop & remove container
+docker stop medical-api && docker rm medical-api
+
+# Rebuild after code changes
+docker build -t medical-compliance-api . && \
+docker stop medical-api && docker rm medical-api && \
+docker run -d --name medical-api -p 5002:5002 --env-file .env medical-compliance-api
+
+# ─── DOCKER COMPOSE ───────────────────────────────────────────────────────────
+
+# Start all services (API + Redis + MongoDB)
+docker compose up -d
+
+# View running services
+docker compose ps
+
+# View logs (all services)
+docker compose logs -f
+
+# View logs (API only)
+docker compose logs -f api
+
+# Stop all services
+docker compose down
+
+# Stop + remove volumes (fresh start)
+docker compose down -v
+
+# Rebuild and restart
+docker compose up -d --build
+
+# ─── PRODUCTION DEPLOY ────────────────────────────────────────────────────────
+
+# Vercel (auto-deploy on push)
+git push origin main
+
+# Docker production build
+docker build -t medical-compliance-api:prod --target production .
+docker run -d \
+  --name medical-api-prod \
+  -p 5002:5002 \
+  --env-file .env \
+  --restart unless-stopped \
+  medical-compliance-api:prod
+
+# ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
+
+curl http://localhost:5002/health
+# Returns: { "success": true, "services": { "database": "Connected", "redis": "Connected" }, "cache": { "hits": ..., "misses": ..., "hitRate": "..." }, "errors": { "low": 0, "medium": 0, "high": 0, "critical": 0 } }
+
+# ─── REDIS CLI (debugging) ────────────────────────────────────────────────────
+
+redis-cli                      # Connect to local Redis
+redis-cli INFO stats           # View cache hit/miss metrics
+redis-cli DBSIZE               # Count cached keys
+redis-cli KEYS "cache:ver:*"   # View version counters
+redis-cli FLUSHDB              # Clear all cached data (dev only)
+
+# ─── PRISMA STUDIO (visual DB browser) ────────────────────────────────────────
+
+npx prisma studio              # Open Prisma Studio in browser

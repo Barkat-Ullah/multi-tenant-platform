@@ -4,6 +4,7 @@ import router from './app/routes';
 import express, { Request, Response } from 'express';
 import {
   apiLimiter,
+  uploadLimiter,
   documentUpload,
   notFound,
   serverHealth,
@@ -17,6 +18,8 @@ import prisma from './app/utils/prisma';
 import { bookingSelect } from './app/modules/booking/booking.select';
 import { BookingStatus } from '@prisma/client';
 import { stripe } from './app/utils/stripe';
+import { CacheInvalidator } from './lib/redis';
+import { isRedisHealthy } from './lib/redis';
 // import { StripeWebHook } from './app/utils/StripeUtils';
 
 const app: Application = express();
@@ -36,6 +39,7 @@ app.post(
 app.post(
   '/api/v1/upload-document',
   auth(),
+  uploadLimiter,
   fileUploader.upload.fields([
     { name: 'image', maxCount: 1 },
     { name: 'video', maxCount: 1 },
@@ -52,7 +56,7 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
-app.get('/payment/success',auth(), async (req: Request, res: Response) => {
+app.get('/payment/success', async (req: Request, res: Response) => {
   const sessionId = req.query.session_id as string;
   const bookingId = req.query.bookingId as string;
 
@@ -124,6 +128,13 @@ app.get('/payment/success',auth(), async (req: Request, res: Response) => {
       return updated;
     });
 
+    // Cross-model invalidation after payment confirmation
+    await Promise.all([
+      CacheInvalidator.onRecordUpdate('booking', metaBookingId),
+      CacheInvalidator.onRecordUpdate('payment', paymentId),
+      CacheInvalidator.onRelatedChange('notification'),
+    ]);
+
     // send payment success mails
     const confirmedBooking = await prisma.booking.findUnique({
       where: { id: metaBookingId },
@@ -150,7 +161,7 @@ app.get('/payment/success',auth(), async (req: Request, res: Response) => {
   }
 });
 
-app.get('/payment/cancel', auth(), (req: Request, res: Response) => {
+app.get('/payment/cancel', (req: Request, res: Response) => {
   res.status(200).json({
     success: false,
     message: 'Payment was cancelled. No charge was made.',

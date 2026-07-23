@@ -8,6 +8,7 @@ import { Request } from 'express';
 import { locationSelect } from './location.select';
 import { buildFilterConditions } from './location.utils';
 import { handleFileUploads } from '../../utils/handleFile';
+import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
 
 // Haversine distance in KM (consistent with existing location listing logic)
 const getDistanceFromLatLonInKm = (
@@ -47,6 +48,8 @@ const createLocation = async (req: Request) => {
     data: addedData,
     select: locationSelect,
   });
+
+  await CacheInvalidator.onRecordCreate('location');
   return result;
 };
 
@@ -86,18 +89,22 @@ const getLocationList = async (
   const whereConditions: Prisma.LocationWhereInput =
     andConditions.length > 0 ? { AND: andConditions } : {};
 
-  const [result, total] = await Promise.all([
-    prisma.location.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      select: locationSelect,
-    }),
-    prisma.location.count({ where: whereConditions }),
-  ]);
+  const cacheKey = await CacheKeys.list('location', { page, limit, searchTerm, ...filterData });
+  const cached = await cacheOr(cacheKey, TTL.LONG, async () => {
+    const [result, total] = await Promise.all([
+      prisma.location.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: locationSelect,
+      }),
+      prisma.location.count({ where: whereConditions }),
+    ]);
+    return { meta: { total, page, limit }, data: result };
+  });
 
-  return { meta: { total, page, limit }, data: result };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // const getLocationList = async (
@@ -241,10 +248,10 @@ const toRad = (value: number) => (value * Math.PI) / 180;
 // get Location by id
 // -------------------------------------------------------
 const getLocationById = async (id: string) => {
-  const result = await prisma.location.findUnique({
-    where: { id },
-    select: locationSelect,
-  });
+  const cacheKey = await CacheKeys.single('location', id);
+  const result = await cacheOr(cacheKey, TTL.LONG, () =>
+    prisma.location.findUnique({ where: { id }, select: locationSelect }),
+  );
   if (!result) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Location not found');
   }
@@ -280,18 +287,22 @@ const getMyLocation = async (
 
   const whereConditions: Prisma.LocationWhereInput = { AND: andConditions };
 
-  const [result, total] = await Promise.all([
-    prisma.location.findMany({
-      skip,
-      take: limit,
-      where: whereConditions,
-      orderBy: { createdAt: 'desc' },
-      select: locationSelect,
-    }),
-    prisma.location.count({ where: whereConditions }),
-  ]);
+  const cacheKey = await CacheKeys.list('location', { page, limit, searchTerm, ...filterData, scope: 'my' });
+  const cached = await cacheOr(cacheKey, TTL.LONG, async () => {
+    const [result, total] = await Promise.all([
+      prisma.location.findMany({
+        skip,
+        take: limit,
+        where: whereConditions,
+        orderBy: { createdAt: 'desc' },
+        select: locationSelect,
+      }),
+      prisma.location.count({ where: whereConditions }),
+    ]);
+    return { meta: { total, page, limit }, data: result };
+  });
 
-  return { meta: { total, page, limit }, data: result };
+  return cached ?? { meta: { total: 0, page, limit }, data: [] };
 };
 
 // -------------------------------------------------------
@@ -403,13 +414,28 @@ const updateLocation = async (req: Request) => {
     select: locationSelect,
   });
 
+  await CacheInvalidator.onRecordUpdate('location', id);
   return result;
 };
 
 // -------------------------------------------------------
 // toggle status Location
 // -------------------------------------------------------
-const toggleStatusLocation = async (id: string) => {};
+const toggleStatusLocation = async (id: string) => {
+  const existingLocation = await prisma.location.findUnique({ where: { id } });
+  if (!existingLocation) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Location not found');
+  }
+
+  const result = await prisma.location.update({
+    where: { id },
+    data: { isDeleted: !(existingLocation as any).isDeleted },
+    select: locationSelect,
+  });
+
+  await CacheInvalidator.onRecordUpdate('location', id);
+  return result;
+};
 
 // -------------------------------------------------------
 // soft delete Location
@@ -430,6 +456,8 @@ const softDeleteLocation = async (id: string) => {
     data: { isDeleted: true },
     select: locationSelect,
   });
+
+  await CacheInvalidator.onRecordUpdate('location', id);
   return result;
 };
 
@@ -442,6 +470,7 @@ const deleteLocation = async (id: string) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Location not found');
   }
   const result = await prisma.location.delete({ where: { id } });
+  await CacheInvalidator.onRecordDelete('location', id);
   return result;
 };
 

@@ -68,6 +68,10 @@ model Booking {
 
     @@index([driverId])
     @@index([clinicId])
+    @@index([status])
+    @@index([driverId, status])
+    @@index([clinicId, status])
+    @@index([scheduledAt])
     @@map("bookings")
 }
 

@@ -19,6 +19,11 @@ router.get(
   UserControllers.getAllUsers,
 );
 router.get('/clinics', authOptional(), UserControllers.getAllClinics);
+router.get(
+  '/organizers',
+  auth(UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN),
+  UserControllers.getAllOrganizers,
+);
 //
 router.get('/org-driver', auth(), UserControllers.getAllOrgDriver);
 router.get(
@@ -107,7 +112,7 @@ router.put(
 );
 
 // Admin/SuperAdmin: Update client basic profile fields
-router.put(
+router.patch(
   '/update-client-info/:id',
   auth(UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN),
   UserControllers.updateClientInfo,

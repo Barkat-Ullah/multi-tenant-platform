@@ -5,6 +5,7 @@ import { serviceController } from './service.controller';
 import { serviceValidation } from './service.validation';
 import { fileUploader } from '../../utils/fileUploader';
 import authOptional from '../../middlewares/authOptional';
+import { cacheControl, cacheProfiles } from '../../middlewares/cacheControl';
 
 const router = express.Router();
 const fileUpload = fileUploader.upload.fields([
@@ -22,11 +23,11 @@ router.post(
   serviceController.createService,
 );
 
-router.get('/', authOptional(), serviceController.getServiceList);
+router.get('/', authOptional(), cacheControl(cacheProfiles.reference), serviceController.getServiceList);
 
 router.get('/my', auth(), serviceController.getMyService);
 
-router.get('/:id', authOptional(), serviceController.getServiceById);
+router.get('/:id', authOptional(), cacheControl(cacheProfiles.reference), serviceController.getServiceById);
 
 router.put(
   '/:id',

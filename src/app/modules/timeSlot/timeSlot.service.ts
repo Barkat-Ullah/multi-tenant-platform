@@ -4,6 +4,7 @@ import ApiError from '../../errors/AppError';
 import httpStatus from 'http-status';
 import { SlotStatus, UserRoleEnum } from '@prisma/client';
 import { availabilitySelect, timeSlotSelect } from './timeSlot.select';
+import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
 
 // -------------------------------------------------------
 // helper — "09:00" → "09:00 AM" / "13:00" → "01:00 PM"
@@ -155,9 +156,10 @@ const createAvailabilityWithSlots = async (req: Request) => {
     ),
   );
 
+  await CacheInvalidator.onRelatedChange('timeSlot');
+
   return {
     availability,
-    // offDays: clinic.offDays,
     isOvernight,
     slotsCreated: createdSlots.length,
     slots: createdSlots.map(s => ({
@@ -191,57 +193,60 @@ const getAvailabilityByMonth = async (req: Request) => {
   const monthStart = new Date(Date.UTC(year, monthIndex, 1));
   const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 1));
 
-  // get offDays + availabilities in parallel
-  const [clinic, availabilities] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: clinicId },
-      select: { offDays: true },
-    }),
-    prisma.clinicAvailability.findMany({
-      where: {
-        clinicId,
-        slotDate: { gte: monthStart, lt: monthEnd },
-        isActive: true,
-      },
-      select: { slotDate: true, isActive: true },
-      orderBy: { slotDate: 'asc' },
-    }),
-  ]);
+  const cacheKey = await CacheKeys.list('timeSlot', { clinicId, month, scope: 'availability' });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const [clinic, availabilities] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: clinicId },
+        select: { offDays: true },
+      }),
+      prisma.clinicAvailability.findMany({
+        where: {
+          clinicId,
+          slotDate: { gte: monthStart, lt: monthEnd },
+          isActive: true,
+        },
+        select: { slotDate: true, isActive: true },
+        orderBy: { slotDate: 'asc' },
+      }),
+    ]);
 
-  const offDays = clinic?.offDays ?? [];
+    const offDays = clinic?.offDays ?? [];
 
-  const availMap = new Map(
-    availabilities.map(a => [a.slotDate.toISOString().split('T')[0], a]),
-  );
+    const availMap = new Map(
+      availabilities.map(a => [a.slotDate.toISOString().split('T')[0], a]),
+    );
 
-  const allDates: string[] = [];
-  const cursor = new Date(monthStart);
-  while (cursor < monthEnd) {
-    allDates.push(cursor.toISOString().split('T')[0]);
-    cursor.setDate(cursor.getDate() + 1);
-  }
+    const allDates: string[] = [];
+    const cursor = new Date(monthStart);
+    while (cursor < monthEnd) {
+      allDates.push(cursor.toISOString().split('T')[0]);
+      cursor.setDate(cursor.getDate() + 1);
+    }
 
-  const data = allDates.map(date => {
-    const dayName = new Date(date)
-      .toLocaleDateString('en-US', { weekday: 'short' })
-      .toLowerCase();
+    const data = allDates.map(date => {
+      const dayName = new Date(date)
+        .toLocaleDateString('en-US', { weekday: 'short' })
+        .toLowerCase();
 
-    const isOffDay = offDays.includes(dayName);
-    const existing = availMap.get(date);
+      const isOffDay = offDays.includes(dayName);
+      const existing = availMap.get(date);
 
-    return {
-      date,
-      // isOffDay,                          // frontend greys this out
-      isActive: existing?.isActive ?? false,
-      status: isOffDay
-        ? 'off'
-        : existing?.isActive
-          ? 'available'
-          : 'unavailable',
-    };
+      return {
+        date,
+        isActive: existing?.isActive ?? false,
+        status: isOffDay
+          ? 'off'
+          : existing?.isActive
+            ? 'available'
+            : 'unavailable',
+      };
+    });
+
+    return { month, offDays, daysInMonth: data.length, data };
   });
 
-  return { month, offDays, daysInMonth: data.length, data };
+  return cached ?? { month, offDays: [], daysInMonth: 0, data: [] };
 };
 
 // -------------------------------------------------------
@@ -266,64 +271,72 @@ const getSlotsByDate = async (req: Request) => {
     .toLocaleDateString('en-US', { weekday: 'short' })
     .toLowerCase();
 
-  // get offDays from clinic profile
-  const clinic = await prisma.user.findUnique({
-    where: { id: clinicId },
-    select: { id: true, offDays: true, fullName: true },
-  });
+  const cacheKey = await CacheKeys.list('timeSlot', { clinicId, date, serviceId, scope: 'slots' });
+  const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
+    const clinic = await prisma.user.findUnique({
+      where: { id: clinicId },
+      select: { id: true, offDays: true, fullName: true },
+    });
 
-  if (!clinic) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Clinic not found');
-  }
+    if (!clinic) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Clinic not found');
+    }
 
-  // check off day first — no need to query availability at all
-  if (clinic.offDays.includes(dayName)) {
-    return {
-      date,
-      isAvailable: false,
-      reason: `Clinic is closed on ${dayName}`,
-      offDays: clinic.offDays,
-      slots: [],
-    };
-  }
+    if (clinic.offDays.includes(dayName)) {
+      return {
+        date,
+        isAvailable: false,
+        reason: `Clinic is closed on ${dayName}`,
+        offDays: clinic.offDays,
+        slots: [],
+      };
+    }
 
-  const availability = await prisma.clinicAvailability.findUnique({
-    where: { clinicId_slotDate: { clinicId, slotDate: dateObj } },
-    include: {
-      timeSlots: {
-        where: { status: SlotStatus.Active },
-        orderBy: { startTime: 'asc' },
-        select: timeSlotSelect,
+    const availability = await prisma.clinicAvailability.findUnique({
+      where: { clinicId_slotDate: { clinicId, slotDate: dateObj } },
+      include: {
+        timeSlots: {
+          where: { status: SlotStatus.Active },
+          orderBy: { startTime: 'asc' },
+          select: timeSlotSelect,
+        },
       },
-    },
-  });
+    });
 
-  if (!availability || !availability.isActive) {
+    if (!availability || !availability.isActive) {
+      return {
+        date,
+        isAvailable: false,
+        reason: 'No availability set for this date',
+        offDays: clinic.offDays,
+        slots: [],
+      };
+    }
+
     return {
       date,
-      isAvailable: false,
-      reason: 'No availability set for this date',
-      offDays: clinic.offDays,
-      slots: [],
+      serviceId: serviceId ?? null,
+      clinicId: clinic.id,
+      isAvailable: true,
+      totalSlots: availability.timeSlots.length,
+      slots: availability.timeSlots.map(s => ({
+        id: s.id,
+        startTime: formatAMPM(s.startTime),
+        endTime: formatAMPM(s.endTime),
+        capacity: s.capacity,
+        booked: s.booked,
+        isBooked: s.isBooked,
+        status: s.status,
+      })),
     };
-  }
+  });
 
-  return {
+  return cached ?? {
     date,
-    serviceId: serviceId ?? null,
-    clinicId: clinic.id,
-    isAvailable: true,
-    // offDays: clinic.offDays,
-    totalSlots: availability.timeSlots.length,
-    slots: availability.timeSlots.map(s => ({
-      id: s.id,
-      startTime: formatAMPM(s.startTime),
-      endTime: formatAMPM(s.endTime),
-      capacity: s.capacity,
-      booked: s.booked,
-      isBooked: s.isBooked,
-      status: s.status,
-    })),
+    isAvailable: false,
+    reason: 'No availability found',
+    offDays: [],
+    slots: [],
   };
 };
 
@@ -379,6 +392,8 @@ const addSingleSlot = async (req: Request) => {
     select: timeSlotSelect,
   });
 
+  await CacheInvalidator.onRelatedChange('timeSlot');
+
   return {
     id: slot.id,
     startTime: formatAMPM(slot.startTime),
@@ -433,6 +448,8 @@ const toggleSlotStatus = async (req: Request) => {
     data: { status: newStatus },
     select: timeSlotSelect,
   });
+
+  await CacheInvalidator.onRelatedChange('timeSlot');
 
   return {
     id: updated.id,
@@ -496,6 +513,8 @@ const deleteAvailability = async (req: Request) => {
 
   await prisma.clinicAvailability.delete({ where: { id } });
 
+  await CacheInvalidator.onRelatedChange('timeSlot');
+
   return null;
 };
 
@@ -508,6 +527,9 @@ const updateOffDays = async (req: Request) => {
     data: { offDays },
     select: { id: true, fullName: true, offDays: true },
   });
+
+  // Invalidate timeSlot caches (offDays affects availability queries)
+  await CacheInvalidator.onRelatedChange('timeSlot');
 
   return updated;
 };
@@ -560,6 +582,8 @@ const toggleAvailabilityDateStatus = async (req: Request) => {
       clinicId: true,
     },
   });
+
+  await CacheInvalidator.onRelatedChange('timeSlot');
 
   return {
     id: updated.id,

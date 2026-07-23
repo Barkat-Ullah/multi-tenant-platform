@@ -3,6 +3,10 @@ import app from './app';
 import config from './config';
 import { initiateSuperAdmin } from './app/db/db';
 import { seedMethod } from './app/modules/paymethod/paymethod.route';
+import { disconnectRedis } from './lib/redis';
+
+// Start BullMQ email worker (processes queued emails)
+import './app/helpers/worker/emailWorker';
 
 // import { setupWebSocket } from './app/middlewares/webSocket';
 
@@ -36,10 +40,15 @@ async function main() {
 }
 
 // Graceful shutdown (improved: handle SIGINT/SIGTERM)
-const gracefulShutdown = (signal: string) => {
+const gracefulShutdown = async (signal: string) => {
   console.log(`🛑 Received ${signal}. Closing server...`);
+
+  // Disconnect Redis gracefully (drains in-flight queue jobs)
+  await disconnectRedis().catch(err =>
+    console.error('Redis disconnect error:', err),
+  );
+
   if (server) {
-    // Null check
     server.close(err => {
       if (err) {
         console.error('⚠️ Server close error:', err);
