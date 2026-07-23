@@ -187,16 +187,18 @@ const createTicket = async (req: Request) => {
   });
 
   if (creator?.email) {
-    mailQueue.add('send-email', {
-      type: 'ticket-created-user',
-      to: creator.email,
-      html: ticketCreatedUserEmail(
-        creator.fullName,
-        result.ticket.ticketNumber,
-        subject,
-      ),
-      subject: `Support Ticket Created: ${result.ticket.ticketNumber}`,
-    }).catch(err => console.error('Ticket creator email queue failed:', err));
+    mailQueue
+      .add('send-email', {
+        type: 'ticket-created-user',
+        to: creator.email,
+        html: ticketCreatedUserEmail(
+          creator.fullName,
+          result.ticket.ticketNumber,
+          subject,
+        ),
+        subject: `Support Ticket Created: ${result.ticket.ticketNumber}`,
+      })
+      .catch(err => console.error('Ticket creator email queue failed:', err));
   }
 
   // Email to each admin
@@ -212,17 +214,19 @@ const createTicket = async (req: Request) => {
   const creatorName = creator?.fullName ?? 'A user';
   for (const admin of admins) {
     if (admin.email) {
-      mailQueue.add('send-email', {
-        type: 'ticket-created-admin',
-        to: admin.email,
-        html: ticketCreatedAdminEmail(
-          admin.fullName,
-          creatorName,
-          result.ticket.ticketNumber,
-          subject,
-        ),
-        subject: `New Support Ticket: ${result.ticket.ticketNumber}`,
-      }).catch(err => console.error('Admin ticket email queue failed:', err));
+      mailQueue
+        .add('send-email', {
+          type: 'ticket-created-admin',
+          to: admin.email,
+          html: ticketCreatedAdminEmail(
+            admin.fullName,
+            creatorName,
+            result.ticket.ticketNumber,
+            subject,
+          ),
+          subject: `New Support Ticket: ${result.ticket.ticketNumber}`,
+        })
+        .catch(err => console.error('Admin ticket email queue failed:', err));
     }
   }
 
@@ -245,6 +249,7 @@ const getTicketList = async (
 
   const userRole = req.user.role;
   const userId = req.user.id;
+  console.log(userId);
 
   if (CUSTOMER_ROLES.includes(userRole as (typeof CUSTOMER_ROLES)[number])) {
     // Customers see only their own tickets
@@ -279,7 +284,14 @@ const getTicketList = async (
   const whereConditions: Prisma.SupportTicketWhereInput =
     andConditions.length > 0 ? { AND: andConditions } : {};
 
-  const cacheKey = await CacheKeys.list('supportTicket', { page, limit, searchTerm, ...filterData, userId, userRole });
+  const cacheKey = await CacheKeys.list('supportTicket', {
+    page,
+    limit,
+    searchTerm,
+    ...filterData,
+    userId,
+    userRole,
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [result, total] = await Promise.all([
       prisma.supportTicket.findMany({
@@ -741,15 +753,17 @@ const getTicketAnalytics = async (req: Request) => {
     };
   });
 
-  return cached ?? {
-    period: period || 'weekly',
-    dateRange: { rangeStart, rangeEnd },
-    statusDistribution: {},
-    categoryDistribution: {},
-    priorityDistribution: {},
-    avgResolutionTimeHours: 0,
-    avgCSAT: 0,
-  };
+  return (
+    cached ?? {
+      period: period || 'weekly',
+      dateRange: { rangeStart, rangeEnd },
+      statusDistribution: {},
+      categoryDistribution: {},
+      priorityDistribution: {},
+      avgResolutionTimeHours: 0,
+      avgCSAT: 0,
+    }
+  );
 };
 
 // ============================================================
