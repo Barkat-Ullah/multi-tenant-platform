@@ -4,11 +4,10 @@ import config from './config';
 import { initiateSuperAdmin } from './app/db/db';
 import { seedMethod } from './app/modules/paymethod/paymethod.route';
 import { disconnectRedis } from './lib/redis';
-
 // Start BullMQ email worker (processes queued emails)
 import './app/helpers/worker/emailWorker';
 
-// import { setupWebSocket } from './app/middlewares/webSocket';
+import { setupWebSocket } from './app/middlewares/webSocket';
 
 const port = config.port || 5000;
 
@@ -31,7 +30,7 @@ async function main() {
 
     // WebSocket setup (after listen)
     console.log('🔌 Setting up WebSocket...');
-    // await setupWebSocket(server);
+    await setupWebSocket(server);
     console.log('✅ WebSocket setup complete!');
   } catch (error) {
     console.error('❌ Failed to start server:', error);
