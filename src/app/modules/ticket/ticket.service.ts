@@ -249,7 +249,7 @@ const getTicketList = async (
 
   const userRole = req.user.role;
   const userId = req.user.id;
-  console.log(userId);
+  // console.log(userId);
 
   if (CUSTOMER_ROLES.includes(userRole as (typeof CUSTOMER_ROLES)[number])) {
     // Customers see only their own tickets
