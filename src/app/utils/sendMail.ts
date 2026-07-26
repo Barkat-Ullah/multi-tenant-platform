@@ -1554,33 +1554,35 @@ export const ticketCreatedAdminEmail = (
 </body>
 </html>`;
 
-const emailSender = async (to: string, html: string, subject: string) => {
-  try {
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: process.env.OWN_MAIL!,
-        pass: process.env.OWN_MAIL_PASS!,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-    });
+const transporter = nodemailer.createTransport({
+  host: process.env.MAILTRAP_HOST!,
+  port: Number(process.env.MAILTRAP_PORT) || 587,
+  secure: false, 
+  auth: {
+    user: process.env.MAILTRAP_USER!,
+    pass: process.env.MAILTRAP_PASSWORD!,
+  },
+});
 
-    const mailOptions = {
-      from: '"Project" <barkatullah585464@gmail.com>',
+const emailSender = async (
+  to: string,
+  html: string,
+  subject: string,
+): Promise<string> => {
+  try {
+    const info = await transporter.sendMail({
+      from: `"Project" <${process.env.MAILTRAP_USER}>`,
       to,
       subject,
       html,
-    };
+    });
 
-    const info = await transporter.sendMail(mailOptions);
+    console.log('Email sent:', info.messageId);
+
     return info.messageId;
   } catch (error) {
     console.error('Email sending failed:', error);
-    throw new Error('Failed to send email. Please try again later.');
+    throw new Error('Failed to send email.');
   }
 };
 
