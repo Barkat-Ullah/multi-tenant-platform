@@ -1554,36 +1554,29 @@ export const ticketCreatedAdminEmail = (
 </body>
 </html>`;
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 2525,
-  secure: false,
-  auth: {
-    user: '9c2e26001@smtp-brevo.com',
-    pass: 'xsmtpsib-6f4ae0a7edf1a4060397ddb2c08fbc2c4cc490b65a0426eda617acdd79231b65-7NzFcx8E4bluIFfc',
-  },
-});
-
-const emailSender = async (
-  to: string,
-  html: string,
-  subject: string,
-): Promise<string> => {
+const emailSender = async (to: string, html: string, subject: string) => {
   try {
-    const info = await transporter.sendMail({
-      from: `"MediCheck Platform" <noreply@multitenant.com>`,
+    const transporter = nodemailer.createTransport({
+      host: 'smtp-relay.brevo.com',
+      port: 2525,
+      secure: false,
+      auth: {
+        user: '88803c001@smtp-brevo.com',
+        pass: 'OzqM8PBhVxbNYEUt',
+      },
+    });
+    const mailOptions = {
+      from: '<akonhasan680@gmail.com>',
       to,
       subject,
+      text: html.replace(/<[^>]+>/g, ''),
       html,
-    });
-
-    console.log('Email sent:', info.messageId);
-
+    };
+    // Send the email
+    const info = await transporter.sendMail(mailOptions);
     return info.messageId;
   } catch (error) {
-    console.error('Email sending failed:', error);
-    throw new Error('Failed to send email.');
+    throw new Error('Failed to send email. Please try again later.');
   }
 };
-
 export default emailSender;
