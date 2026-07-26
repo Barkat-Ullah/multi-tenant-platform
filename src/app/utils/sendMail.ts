@@ -1555,12 +1555,12 @@ export const ticketCreatedAdminEmail = (
 </html>`;
 
 const transporter = nodemailer.createTransport({
-  host: process.env.MAILTRAP_HOST!,
-  port: Number(process.env.MAILTRAP_PORT) || 587,
-  secure: false, 
+  host: 'smtp-relay.brevo.com',
+  port: 2525,
+  secure: false,
   auth: {
-    user: process.env.MAILTRAP_USER!,
-    pass: process.env.MAILTRAP_PASSWORD!,
+    user: '9c2e26001@smtp-brevo.com',
+    pass: 'xsmtpsib-6f4ae0a7edf1a4060397ddb2c08fbc2c4cc490b65a0426eda617acdd79231b65-7NzFcx8E4bluIFfc',
   },
 });
 
@@ -1571,7 +1571,7 @@ const emailSender = async (
 ): Promise<string> => {
   try {
     const info = await transporter.sendMail({
-      from: `"Project" <${process.env.MAILTRAP_USER}>`,
+      from: `"MediCheck Platform" <noreply@multitenant.com>`,
       to,
       subject,
       html,
