@@ -46,6 +46,11 @@ router.get(
 router.get('/:id', authOptional(), UserControllers.getUserDetails);
 
 router.post(
+  '/create-admin',
+  auth(UserRoleEnum.SUPERADMIN),
+  UserControllers.createAdmin,
+);
+router.post(
   '/org-driver',
   auth(UserRoleEnum.ADMIN, UserRoleEnum.ORGINIZER, UserRoleEnum.SUPERADMIN),
   UserControllers.createOrgDriver,

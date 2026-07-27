@@ -451,6 +451,33 @@ const getUserDetailsFromDB = async (req: Request) => {
   return result;
 };
 
+// ─────────────────────────────────────────────────────────
+//create admin
+const createAdminIntoDB = async (req: Request) => {
+  const { fullName, email, phoneNumber, password = '123456' } = req.body;
+
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (existingUser) {
+    throw new ApiError(httpStatus.CONFLICT, 'Email already in use');
+  }
+
+  const result = await prisma.user.create({
+    data: {
+      fullName,
+      email,
+      phoneNumber,
+      password,
+      role: UserRoleEnum.ADMIN,
+    },
+  });
+
+  await CacheInvalidator.onRecordCreate('user');
+  return result;
+};
+
 //
 const createOrgDriverIntoDB = async (req: Request) => {
   const organizerId = req.user.id;
@@ -1533,4 +1560,5 @@ export const UserServices = {
   //admin
   updateClientInfoIntoDB,
   sendManualEmailIntoDB,
+  createAdminIntoDB,
 };

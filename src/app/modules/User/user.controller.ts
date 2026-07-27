@@ -5,6 +5,14 @@ import { UserServices } from './user.service';
 import pick from '../../utils/pickValidFields';
 
 const getFilterableFields = ['searchTerm', 'status', 'role'];
+const createAdmin = catchAsync(async (req, res) => {
+  const result = await UserServices.createAdminIntoDB(req);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Admin created successfully',
+    data: result,
+  });
+});
 const getAllUsers = catchAsync(async (req, res) => {
   const options = pick(req.query, ['limit', 'page', 'sortBy', 'sortOrder']);
   const filters = pick(req.query, getFilterableFields);
@@ -252,4 +260,5 @@ export const UserControllers = {
   //admin
   updateClientInfo,
   sendManualEmail,
+  createAdmin
 };
