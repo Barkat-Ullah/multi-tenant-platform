@@ -14,6 +14,8 @@ import { IPaginationOptions } from '../../interface/pagination.type';
 import { paginationHelper } from '../../utils/calculatePagination';
 import * as bcrypt from 'bcrypt';
 import emailSender, { inviteClinicEmail } from '../../utils/sendMail';
+import { inviteAdminEmail } from '../../utils/inviteAdminEmail';
+import { mailQueue } from '../../helpers/queue';
 import { fileUploader } from '../../utils/fileUploader';
 import { invalidateUserCache } from '../../../lib/authRedis';
 import { CacheInvalidator, cacheOr, CacheKeys, TTL } from '../../../lib/redis';
@@ -84,7 +86,13 @@ const getAllUsersFromDB = async (
           },
         };
 
-  const cacheKey = await CacheKeys.list('user', { page, limit, searchTerm, ...filterData, scope: 'all' });
+  const cacheKey = await CacheKeys.list('user', {
+    page,
+    limit,
+    searchTerm,
+    ...filterData,
+    scope: 'all',
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const users = await prisma.user.findMany({
       where: whereConditions,
@@ -167,119 +175,132 @@ const getUserDetailsFromDB = async (req: Request) => {
   const cacheKey = await CacheKeys.single('user', id);
   const result = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const user = await prisma.user.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-      phoneNumber: true,
-      role: true,
-      status: true,
-      describe: true,
-      city: true,
-      address: true,
-      image: true,
-      dob: true,
-      createdAt: true,
-      // Driver-specific fields
-      licenseNo: true,
-      dateOfBirth: true,
-      medicalStatus: true,
-      medicalExpiry: true,
-      // Clinic-specific fields
-      clinicGmcNumber: true,
-      isParking: true,
-      offDays: true,
-      locationId: true,
-      // Organizer-specific
-      companyLocation: true,
-      organizerId: true,
-      // Admin who created this user
-      createdById: true,
-    },
-  });
+      where: { id },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phoneNumber: true,
+        role: true,
+        status: true,
+        describe: true,
+        city: true,
+        address: true,
+        image: true,
+        dob: true,
+        createdAt: true,
+        // Driver-specific fields
+        licenseNo: true,
+        dateOfBirth: true,
+        medicalStatus: true,
+        medicalExpiry: true,
+        // Clinic-specific fields
+        clinicGmcNumber: true,
+        isParking: true,
+        offDays: true,
+        locationId: true,
+        // Organizer-specific
+        companyLocation: true,
+        organizerId: true,
+        // Admin who created this user
+        createdById: true,
+      },
+    });
 
-  if (!user) {
-    throw new AppError(httpStatus.NOT_FOUND, 'User not found');
-  }
-
-  const { role } = user;
-
-  // ─── ROLE-BASED DATA FETCH ─────────────────────────────────
-  let roleSpecificData: Record<string, any> = {};
-
-  if (role === UserRoleEnum.USER) {
-    // ── Driver: bookings, medical records, organizer info ──
-    const [bookings, medicalRecords, tickets] = await Promise.all([
-      prisma.booking.findMany({
-        where: { driverId: id },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-        select: {
-          id: true,
-          scheduledAt: true,
-          status: true,
-          createdAt: true,
-          clinic: { select: { id: true, fullName: true } },
-          service: { select: { id: true, title: true } },
-          timeSlot: { select: { date: true, startTime: true, endTime: true } },
-        },
-      }),
-      prisma.medicalRecord.findMany({
-        where: { driverId: id },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-        select: {
-          id: true,
-          result: true,
-          files: true,
-          notes: true,
-          expiryDate: true,
-          createdAt: true,
-          clinic: { select: { id: true, fullName: true } },
-          booking: { select: { id: true, scheduledAt: true } },
-        },
-      }),
-      prisma.supportTicket.findMany({
-        where: { createdById: id },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-        select: {
-          id: true,
-          ticketNumber: true,
-          subject: true,
-          status: true,
-          priority: true,
-          createdAt: true,
-        },
-      }),
-    ]);
-
-    roleSpecificData = {
-      bookings,
-      medicalRecords,
-      tickets,
-      bookingCount: await prisma.booking.count({ where: { driverId: id } }),
-      medicalRecordCount: await prisma.medicalRecord.count({
-        where: { driverId: id },
-      }),
-      ticketCount: await prisma.supportTicket.count({
-        where: { createdById: id },
-      }),
-    };
-
-    // If driver belongs to an organizer, include organizer info
-    if (user.organizerId) {
-      const organizer = await prisma.user.findUnique({
-        where: { id: user.organizerId },
-        select: { id: true, fullName: true, email: true, companyLocation: true },
-      });
-      roleSpecificData.organizer = organizer;
+    if (!user) {
+      throw new AppError(httpStatus.NOT_FOUND, 'User not found');
     }
-  } else if (role === UserRoleEnum.CLINIC) {
-    // ── Clinic: bookings, time slots, services, location ──
-    const [location, clinicServices, bookings, timeSlots, medicalRecords, organizerRequests] =
-      await Promise.all([
+
+    const { role } = user;
+
+    // ─── ROLE-BASED DATA FETCH ─────────────────────────────────
+    let roleSpecificData: Record<string, any> = {};
+
+    if (role === UserRoleEnum.USER) {
+      // ── Driver: bookings, medical records, organizer info ──
+      const [bookings, medicalRecords, tickets] = await Promise.all([
+        prisma.booking.findMany({
+          where: { driverId: id },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: {
+            id: true,
+            scheduledAt: true,
+            status: true,
+            createdAt: true,
+            clinic: { select: { id: true, fullName: true } },
+            service: { select: { id: true, title: true } },
+            timeSlot: {
+              select: { date: true, startTime: true, endTime: true },
+            },
+          },
+        }),
+        prisma.medicalRecord.findMany({
+          where: { driverId: id },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: {
+            id: true,
+            result: true,
+            files: true,
+            notes: true,
+            expiryDate: true,
+            createdAt: true,
+            clinic: { select: { id: true, fullName: true } },
+            booking: { select: { id: true, scheduledAt: true } },
+          },
+        }),
+        prisma.supportTicket.findMany({
+          where: { createdById: id },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: {
+            id: true,
+            ticketNumber: true,
+            subject: true,
+            status: true,
+            priority: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+
+      roleSpecificData = {
+        bookings,
+        medicalRecords,
+        tickets,
+        bookingCount: await prisma.booking.count({ where: { driverId: id } }),
+        medicalRecordCount: await prisma.medicalRecord.count({
+          where: { driverId: id },
+        }),
+        ticketCount: await prisma.supportTicket.count({
+          where: { createdById: id },
+        }),
+      };
+
+      // If driver belongs to an organizer, include organizer info
+      if (user.organizerId) {
+        const organizer = await prisma.user.findUnique({
+          where: { id: user.organizerId },
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            companyLocation: true,
+          },
+        });
+        roleSpecificData.organizer = organizer;
+      }
+    } else if (role === UserRoleEnum.CLINIC) {
+      // ── Clinic: bookings, time slots, services, location ──
+      const [
+        location,
+        clinicServices,
+        bookings,
+        timeSlots,
+        medicalRecords,
+        organizerRequests,
+      ] = await Promise.all([
         prisma.location.findUnique({
           where: { id: user.locationId ?? undefined },
           select: { id: true, locationName: true, totalBookings: true },
@@ -301,7 +322,9 @@ const getUserDetailsFromDB = async (req: Request) => {
             createdAt: true,
             driver: { select: { id: true, fullName: true, email: true } },
             service: { select: { id: true, title: true } },
-            timeSlot: { select: { date: true, startTime: true, endTime: true } },
+            timeSlot: {
+              select: { date: true, startTime: true, endTime: true },
+            },
           },
         }),
         prisma.timeSlot.findMany({
@@ -345,104 +368,107 @@ const getUserDetailsFromDB = async (req: Request) => {
         }),
       ]);
 
-    roleSpecificData = {
-      location: location ?? null,
-      services: clinicServices.map(cs => cs.service),
-      bookings,
-      timeSlots,
-      medicalRecords,
-      organizerRequests,
-      bookingCount: await prisma.booking.count({ where: { clinicId: id } }),
-      timeSlotCount: await prisma.timeSlot.count({ where: { clinicId: id } }),
-      medicalRecordCount: await prisma.medicalRecord.count({
-        where: { clinicId: id },
-      }),
-    };
-  } else if (role === UserRoleEnum.ORGINIZER) {
-    // ── Organizer: drivers, organizer requests ──
-    const [drivers, organizerRequests] = await Promise.all([
-      prisma.user.findMany({
-        where: { organizerId: id, isDeleted: false },
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          fullName: true,
-          email: true,
-          phoneNumber: true,
-          image: true,
-          status: true,
-          medicalStatus: true,
-          medicalExpiry: true,
-          createdAt: true,
-        },
-      }),
-      prisma.organizerRequest.findMany({
-        where: { userId: id },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-        select: {
-          id: true,
-          companyName: true,
-          status: true,
-          totalDriver: true,
-          createdAt: true,
-          service: { select: { id: true, title: true } },
-          clinic: { select: { id: true, fullName: true } },
-        },
-      }),
-    ]);
+      roleSpecificData = {
+        location: location ?? null,
+        services: clinicServices.map(cs => cs.service),
+        bookings,
+        timeSlots,
+        medicalRecords,
+        organizerRequests,
+        bookingCount: await prisma.booking.count({ where: { clinicId: id } }),
+        timeSlotCount: await prisma.timeSlot.count({ where: { clinicId: id } }),
+        medicalRecordCount: await prisma.medicalRecord.count({
+          where: { clinicId: id },
+        }),
+      };
+    } else if (role === UserRoleEnum.ORGINIZER) {
+      // ── Organizer: drivers, organizer requests ──
+      const [drivers, organizerRequests] = await Promise.all([
+        prisma.user.findMany({
+          where: { organizerId: id, isDeleted: false },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phoneNumber: true,
+            image: true,
+            status: true,
+            medicalStatus: true,
+            medicalExpiry: true,
+            createdAt: true,
+          },
+        }),
+        prisma.organizerRequest.findMany({
+          where: { userId: id },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: {
+            id: true,
+            companyName: true,
+            status: true,
+            totalDriver: true,
+            createdAt: true,
+            service: { select: { id: true, title: true } },
+            clinic: { select: { id: true, fullName: true } },
+          },
+        }),
+      ]);
 
-    roleSpecificData = {
-      drivers,
-      organizerRequests,
-      driverCount: drivers.length,
-      organizerRequestCount: await prisma.organizerRequest.count({
-        where: { userId: id },
-      }),
-    };
-  } else if (role === UserRoleEnum.ADMIN || role === UserRoleEnum.SUPERADMIN) {
-    // ── Admin/SuperAdmin: created users, activity log ──
-    const [createdUsers, recentAuditLogs] = await Promise.all([
-      prisma.user.findMany({
-        where: { createdById: id, isDeleted: false },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-        select: {
-          id: true,
-          fullName: true,
-          email: true,
-          role: true,
-          status: true,
-          createdAt: true,
-        },
-      }),
-      prisma.auditLog.findMany({
-        where: { actorId: id },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-        select: {
-          id: true,
-          action: true,
-          targetModel: true,
-          targetId: true,
-          createdAt: true,
-        },
-      }),
-    ]);
+      roleSpecificData = {
+        drivers,
+        organizerRequests,
+        driverCount: drivers.length,
+        organizerRequestCount: await prisma.organizerRequest.count({
+          where: { userId: id },
+        }),
+      };
+    } else if (
+      role === UserRoleEnum.ADMIN ||
+      role === UserRoleEnum.SUPERADMIN
+    ) {
+      // ── Admin/SuperAdmin: created users, activity log ──
+      const [createdUsers, recentAuditLogs] = await Promise.all([
+        prisma.user.findMany({
+          where: { createdById: id, isDeleted: false },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            role: true,
+            status: true,
+            createdAt: true,
+          },
+        }),
+        prisma.auditLog.findMany({
+          where: { actorId: id },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: {
+            id: true,
+            action: true,
+            targetModel: true,
+            targetId: true,
+            createdAt: true,
+          },
+        }),
+      ]);
 
-    roleSpecificData = {
-      createdUsers,
-      recentActivity: recentAuditLogs,
-      totalUsersCreated: await prisma.user.count({
-        where: { createdById: id, isDeleted: false },
-      }),
-    };
-  }
+      roleSpecificData = {
+        createdUsers,
+        recentActivity: recentAuditLogs,
+        totalUsersCreated: await prisma.user.count({
+          where: { createdById: id, isDeleted: false },
+        }),
+      };
+    }
 
-  return {
-    ...user,
-    roleSpecificData,
-  };
+    return {
+      ...user,
+      roleSpecificData,
+    };
   });
 
   if (!result) {
@@ -454,7 +480,7 @@ const getUserDetailsFromDB = async (req: Request) => {
 // ─────────────────────────────────────────────────────────
 //create admin
 const createAdminIntoDB = async (req: Request) => {
-  const { fullName, email, phoneNumber, password = '123456' } = req.body;
+  const { fullName, email, phoneNumber, password } = req.body;
 
   const existingUser = await prisma.user.findUnique({
     where: { email },
@@ -463,18 +489,30 @@ const createAdminIntoDB = async (req: Request) => {
   if (existingUser) {
     throw new ApiError(httpStatus.CONFLICT, 'Email already in use');
   }
-
+  const hashedPassword = await bcrypt.hash(password, 10);
   const result = await prisma.user.create({
     data: {
       fullName,
       email,
       phoneNumber,
-      password,
+      password: hashedPassword,
       role: UserRoleEnum.ADMIN,
     },
   });
 
+
   await CacheInvalidator.onRecordCreate('user');
+
+  // Send welcome email via BullMQ background job — don't block response
+  const html = inviteAdminEmail(fullName, email, password);
+  mailQueue.add('send-admin-invite', {
+    to: email,
+    html,
+    subject: 'Your Admin Account Has Been Created',
+  }).catch(err => {
+    console.error(`Failed to queue admin invite email for ${email}:`, err);
+  });
+
   return result;
 };
 
@@ -534,7 +572,13 @@ const getAllOrgDriverFromDB = async (
 
   const whereConditions: Prisma.UserWhereInput = { AND: andConditions };
 
-  const cacheKey = await CacheKeys.myList('user', req.user.id, { page, limit, searchTerm, status, scope: 'orgDrivers' });
+  const cacheKey = await CacheKeys.myList('user', req.user.id, {
+    page,
+    limit,
+    searchTerm,
+    status,
+    scope: 'orgDrivers',
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [drivers, total] = await Promise.all([
       prisma.user.findMany({
@@ -631,7 +675,12 @@ const getAllOrgDriverReportsFromDB = async (
     AND: andConditions,
   };
 
-  const cacheKey = await CacheKeys.myList('medicalRecord', req.user.id, { page, limit, searchTerm, scope: 'orgReports' });
+  const cacheKey = await CacheKeys.myList('medicalRecord', req.user.id, {
+    page,
+    limit,
+    searchTerm,
+    scope: 'orgReports',
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [records, total] = await Promise.all([
       prisma.medicalRecord.findMany({
@@ -641,7 +690,12 @@ const getAllOrgDriverReportsFromDB = async (
           files: true,
           createdAt: true,
           driver: {
-            select: { id: true, fullName: true, image: true, phoneNumber: true },
+            select: {
+              id: true,
+              fullName: true,
+              image: true,
+              phoneNumber: true,
+            },
           },
           clinic: {
             select: { id: true, fullName: true },
@@ -873,7 +927,13 @@ const getAllClinicsFromDB = async (
       ? { AND: andConditions }
       : { role: UserRoleEnum.CLINIC };
 
-  const cacheKey = await CacheKeys.list('user', { page, limit, searchTerm, ...filterData, scope: 'clinics' });
+  const cacheKey = await CacheKeys.list('user', {
+    page,
+    limit,
+    searchTerm,
+    ...filterData,
+    scope: 'clinics',
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [users, total] = await prisma.$transaction([
       prisma.user.findMany({
@@ -1401,7 +1461,13 @@ const getAllOrganizersFromDB = async (
       ? { AND: andConditions }
       : { role: UserRoleEnum.ORGINIZER };
 
-  const cacheKey = await CacheKeys.list('user', { page, limit, searchTerm, ...filterData, scope: 'organizers' });
+  const cacheKey = await CacheKeys.list('user', {
+    page,
+    limit,
+    searchTerm,
+    ...filterData,
+    scope: 'organizers',
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [users, total, driverCounts, requestCounts] = await Promise.all([
       prisma.user.findMany({
