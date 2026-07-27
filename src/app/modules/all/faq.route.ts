@@ -3,7 +3,7 @@ import catchAsync from '../../utils/catchAsync';
 import auth from '../../middlewares/auth';
 import prisma from '../../utils/prisma';
 import authOptional from '../../middlewares/authOptional';
-import { cacheControl, cacheProfiles } from '../../middlewares/cacheControl';
+import { CacheInvalidator, cacheOr, CacheKeys, TTL } from '../../../lib/redis';
 
 const router = express.Router();
 
@@ -18,15 +18,19 @@ router.post(
         description,
       },
     });
+    // Invalidate list caches so subsequent GET picks up the new record
+    await CacheInvalidator.onRecordCreate('faq');
     res.status(201).json(result);
   }),
 );
 router.get(
   '/',
   authOptional(),
-  cacheControl(cacheProfiles.static),
   catchAsync(async (req, res) => {
-    const result = await prisma.faq.findMany();
+    const cacheKey = await CacheKeys.list('faq', { scope: 'all' });
+    const result = await cacheOr(cacheKey, TTL.DAY, () =>
+      prisma.faq.findMany(),
+    );
     res.status(200).json(result);
   }),
 );
@@ -43,6 +47,7 @@ router.put(
         description,
       },
     });
+    await CacheInvalidator.onRecordUpdate('faq', id);
     res.status(200).json(result);
   }),
 );
