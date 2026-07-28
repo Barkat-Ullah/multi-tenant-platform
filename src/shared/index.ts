@@ -39,7 +39,7 @@ export const setupMiddlewares = (app: Application): void => {
   // CORS
   app.use(
     cors({
-      origin: ['http://localhost:3001', 'http://localhost:3000', 'https://compliancemed-frontend.vercel.app'],
+      origin: ['http://localhost:3001', 'http://localhost:3000', 'https://compliancemed-frontend.vercel.app','https://multi-tenant-platform-five.vercel.app','https://platform.multiple.barkatullah.dev'],
       allowedHeaders: [
         'Content-Type',
         'Authorization',

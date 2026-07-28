@@ -41,3 +41,9 @@ export const initiateSuperAdmin = async () => {
     data: adminPayload,
   });
 };
+
+// { label: "Driver", email: "driver@demo.com", password: "Demo@123", color: "bg-blue-500 hover:bg-blue-600" },
+// { label: "Clinic", email: "clinic@demo.com", password: "Demo@123", color: "bg-green-500 hover:bg-green-600" },
+// { label: "Organizer", email: "organizer@demo.com", password: "Demo@123", color: "bg-purple-500 hover:bg-purple-600" },
+// { label: "Admin", email: "admin@demo.com", password: "Demo@123", color: "bg-orange-500 hover:bg-orange-600" },
+// { label: "Super Admin", email: "superadmin@demo.com", password: "Demo@123", color: "bg-red-500 hover:bg-red-600" },
