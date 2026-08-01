@@ -1,7 +1,7 @@
 import { createServer, Server as HTTPServer } from 'http';
 import app from './app';
 import config from './config';
-import { initiateSuperAdmin } from './app/db/db';
+import { seedDemoUsers } from './app/db/db';
 import { seedMethod } from './app/modules/paymethod/paymethod.route';
 import { disconnectRedis } from './lib/redis';
 import { setupWebSocket } from './app/helpers/webSocket';
@@ -25,7 +25,7 @@ async function main() {
   try {
     // Seed data (await to ensure completion before listen)
     // console.log('🌱 Seeding super admin data...');
-    await initiateSuperAdmin();
+    await seedDemoUsers();
     await seedMethod();
 
     console.log(`🚀 Starting server on port ${port}...`);

@@ -6,6 +6,7 @@ import {
   TicketCategory,
   UserRoleEnum,
 } from '@prisma/client';
+import { ObjectId } from 'mongodb';
 import prisma from '../../utils/prisma';
 import { IPaginationOptions } from '../../interface/pagination.type';
 import { paginationHelper } from '../../utils/calculatePagination';
@@ -148,26 +149,33 @@ const createTicket = async (req: Request) => {
       },
     });
 
-    // Get all admins for in-app notification
+    // Get all admins for in-app notification, grabbing email/fullName so the
+    // notification emails after the transaction can reuse this query.
     const admins = await tx.user.findMany({
       where: {
         role: { in: [UserRoleEnum.ADMIN, UserRoleEnum.SUPERADMIN] },
         isDeleted: false,
       },
-      select: { id: true },
+      select: { id: true, email: true, fullName: true },
     });
 
-    // Create in-app notification for each admin
-    for (const admin of admins) {
-      await tx.notification.create({
-        data: {
-          receiverId: admin.id,
-          senderId: ticketOwnerId,
+    // Batch insert in-app notifications in ONE command instead of N creates.
+    // Prisma's createMany is unsupported on MongoDB, so use a raw insert
+    // (same pattern as the time slot generator).
+    if (admins.length > 0) {
+      await tx.$runCommandRaw({
+        insert: 'notifications',
+        documents: admins.map(admin => ({
+          receiverId: new ObjectId(admin.id),
+          senderId: new ObjectId(ticketOwnerId),
           title: 'New Support Ticket',
           body: `Ticket ${ticketNumber}: ${subject.substring(0, 100)}`,
           type: 'Message',
           referenceId: ticket.id,
-        },
+          isRead: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })),
       });
     }
 
@@ -201,18 +209,10 @@ const createTicket = async (req: Request) => {
       .catch(err => console.error('Ticket creator email queue failed:', err));
   }
 
-  // Email to each admin
-  const admins = result.admins?.length
-    ? await prisma.user.findMany({
-        where: {
-          id: { in: result.admins.map(a => a.id) },
-        },
-        select: { email: true, fullName: true },
-      })
-    : [];
-
+  // Email to each admin — reuse the admins fetched inside the transaction,
+  // no second DB query.
   const creatorName = creator?.fullName ?? 'A user';
-  for (const admin of admins) {
+  for (const admin of result.admins) {
     if (admin.email) {
       mailQueue
         .add('send-email', {
