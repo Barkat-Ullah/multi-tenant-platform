@@ -372,6 +372,58 @@ export const CacheInvalidator = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Global Cache Flush (admin-only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Delete every versioned data-cache key (prefix `cache:*`) and reset the
+ * in-process version cache.
+ *
+ * Scope is intentionally limited to the model/data cache — OTPs, pending
+ * registrations, the auth token cache (`auth:*`), the JWT blacklist
+ * (`blacklist:*`) and online-user profiles (`ws:*`) are preserved.
+ *
+ * Deleting the `cache:ver:*` version keys resets every version counter to 0,
+ * so any key built concurrently (with a stale version) simply never matches
+ * the new `v0` namespace and expires on its own TTL.
+ */
+export async function invalidateAllCache(): Promise<number> {
+  const stream = redis.scanStream({ match: 'cache:*', count: 1000 });
+  const keys: string[] = [];
+
+  return new Promise<number>((resolve, reject) => {
+    stream.on('data', (batch: string[]) => {
+      if (batch.length) keys.push(...batch);
+    });
+
+    stream.on('error', err => {
+      console.error(`Redis SCAN failed during cache flush: ${err.message}`);
+      reject(err);
+    });
+
+    stream.on('end', async () => {
+      try {
+        const CHUNK_SIZE = 1000;
+        let deleted = 0;
+        for (let i = 0; i < keys.length; i += CHUNK_SIZE) {
+          const chunk = keys.slice(i, i + CHUNK_SIZE);
+          if (chunk.length) {
+            deleted += await redis.del(...chunk);
+          }
+        }
+        // Drop in-process version cache so no stale version number is reused.
+        versionCache.clear();
+        console.info(`Redis cache flushed: ${deleted} keys deleted`);
+        resolve(deleted);
+      } catch (err: any) {
+        console.error(`Redis cache flush failed: ${err.message}`);
+        reject(err);
+      }
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Token Blacklist (JWT logout / invalidation)
 // ─────────────────────────────────────────────────────────────────────────────
 
