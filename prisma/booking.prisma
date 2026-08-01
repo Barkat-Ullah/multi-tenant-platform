@@ -34,6 +34,7 @@ model TimeSlot {
     clinic          User               @relation("ClinicTimeSlots", fields: [clinicId], references: [id])
     bookings        Booking[]
 
+    @@index([clinicId, date, status])
     @@unique([clinicId, date, startTime])
     @@index([clinicId, date])
     @@map("time_slots")
@@ -66,6 +67,9 @@ model Booking {
     medicalRecord MedicalRecord?
     tickets SupportTicket[]
 
+    @@index([driverId, scheduledAt])
+    @@index([clinicId, scheduledAt])
+    @@index([status, createdAt])
     @@index([driverId])
     @@index([clinicId])
     @@index([status])

@@ -33,7 +33,7 @@ export const setupMiddlewares = (app: Application): void => {
       if (req.query['no-compression']) return false;
       return compression.filter(req, res);
     },
-    threshold: 1024,
+    threshold: 4096,
   }));
 
   // CORS

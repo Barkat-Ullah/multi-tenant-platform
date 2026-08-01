@@ -1,9 +1,8 @@
 
 import redis from "../../../lib/redis";
 import { cleanQueue } from "../cleanQueue/cleanOtpQueue";
-import { mailQueue, otpQueue } from "../queue"; 
+import { mailQueue } from "../queue";
 import { emailWorker } from "../worker/emailWorker";
-import { otpWorker } from "../worker/otpWorker";
 
 let cleanerInterval: NodeJS.Timeout | null = null;
 
@@ -11,9 +10,9 @@ export const initializeQueueSystem = () => {
 
   if (cleanerInterval) clearInterval(cleanerInterval);
 
-  (async function startOtpCleaner() {
+  (async function startMailCleaner() {
     try {
-      await cleanQueue(otpQueue);
+      await cleanQueue(mailQueue);
       console.log("✅ queue cleaned (startup)");
     } catch (err) {
       console.error("❌ queue cleaner (startup) failed:", err);
@@ -22,7 +21,7 @@ export const initializeQueueSystem = () => {
     const MINUTES = 10 * 60 * 1000; // 10 minutes
     cleanerInterval = setInterval(async () => {
       try {
-        await cleanQueue(otpQueue);
+        await cleanQueue(mailQueue);
         console.log("✅ queue cleaned (scheduled)");
       } catch (err) {
         console.error("❌ queue cleaner (scheduled) error:", err);
@@ -31,20 +30,15 @@ export const initializeQueueSystem = () => {
   })();
 
   return {
-    otpWorker,
     emailWorker,
   };
 };
 
 export const getQueueStatus = async () => {
   try {
-    const [otpStats, mailStats] = await Promise.all([
-      otpQueue.getJobCounts(),
-      mailQueue.getJobCounts(),
-    ]);
+    const mailStats = await mailQueue.getJobCounts();
 
     return {
-      otpQueue: otpStats,
       mailQueue: mailStats,
       timestamp: new Date().toISOString(),
     };
@@ -64,7 +58,6 @@ export const setupGracefulShutdown = () => {
     try {
 
       await Promise.all([
-        otpQueue.close(),
         mailQueue.close(),
         // notificationQueue.close(),
       ]);

@@ -35,7 +35,7 @@ const startGlobalHeartbeat = () => {
       });
     });
 
-    if (activeCount > 0) {
+    if (activeCount > 0 && process.env.DEBUG_SSE === 'true') {
       console.log(`Heartbeat sent to ${activeCount} connections`);
     }
   }, 20000);

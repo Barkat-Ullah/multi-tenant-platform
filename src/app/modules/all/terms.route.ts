@@ -4,6 +4,7 @@ import auth from '../../middlewares/auth';
 import prisma from '../../utils/prisma';
 import authOptional from '../../middlewares/authOptional';
 import { CacheInvalidator, cacheOr, CacheKeys, TTL } from '../../../lib/redis';
+import { cacheControl, cacheProfiles } from '../../middlewares/cacheControl';
 
 const router = express.Router();
 
@@ -25,6 +26,7 @@ router.post(
 router.get(
   '/',
   authOptional(),
+  cacheControl(cacheProfiles.static),
   catchAsync(async (req, res) => {
     const cacheKey = await CacheKeys.single('terms', 'first');
     const result = await cacheOr(cacheKey, TTL.DAY, () =>

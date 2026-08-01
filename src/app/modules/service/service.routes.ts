@@ -23,11 +23,11 @@ router.post(
   serviceController.createService,
 );
 
-router.get('/', authOptional(), cacheControl(cacheProfiles.reference), serviceController.getServiceList);
+router.get('/', authOptional(), cacheControl(cacheProfiles.static), serviceController.getServiceList);
 
 router.get('/my', auth(), serviceController.getMyService);
 
-router.get('/:id', authOptional(), cacheControl(cacheProfiles.reference), serviceController.getServiceById);
+router.get('/:id', authOptional(), cacheControl(cacheProfiles.static), serviceController.getServiceById);
 
 router.put(
   '/:id',

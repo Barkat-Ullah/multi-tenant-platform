@@ -116,36 +116,36 @@ const createBooking = async (req: Request) => {
   // When admin books, they must provide a clientId; otherwise use the authenticated user
   const driverId = isAdmin ? (req.body.clientId || adminId) : req.user.id;
 
-  const admins = await getAdminAndSuperAdminEmails();
-
-  const driver = await prisma.user.findUnique({
-    where: { id: driverId },
-    select: { email: true, fullName: true },
-  });
+  // Independent lookups run in parallel — one round of latency instead of sequential.
+  const [admins, driver, clinic, timeSlot] = await Promise.all([
+    getAdminAndSuperAdminEmails(),
+    prisma.user.findUnique({
+      where: { id: driverId },
+      select: { email: true, fullName: true },
+    }),
+    prisma.user.findFirst({
+      where: { id: clinicId, role: UserRoleEnum.CLINIC, isDeleted: false },
+      select: {
+        id: true,
+        fullName: true,
+        location: {
+          select: {
+            id: true,
+          },
+        },
+      },
+    }),
+    prisma.timeSlot.findUnique({
+      where: { id: timeSlotId },
+    }),
+  ]);
 
   if (!driver) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Client not found');
   }
-
-  const clinic = await prisma.user.findFirst({
-    where: { id: clinicId, role: UserRoleEnum.CLINIC, isDeleted: false },
-    select: {
-      id: true,
-      fullName: true,
-      location: {
-        select: {
-          id: true,
-        },
-      },
-    },
-  });
   if (!clinic) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Clinic not found');
   }
-
-  const timeSlot = await prisma.timeSlot.findUnique({
-    where: { id: timeSlotId },
-  });
   if (!timeSlot) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Time slot not found');
   }

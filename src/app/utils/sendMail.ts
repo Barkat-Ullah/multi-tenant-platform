@@ -1554,17 +1554,23 @@ export const ticketCreatedAdminEmail = (
 </body>
 </html>`;
 
+// Module-level singleton — created ONCE and reused for all sends.
+// Reusing the transporter avoids a fresh TCP+SMTP handshake (~10-50ms) per email.
+const transporter = nodemailer.createTransport({
+  host: 'smtp-relay.brevo.com',
+  port: 2525,
+  secure: false,
+  auth: {
+    user: '88803c001@smtp-brevo.com',
+    pass: 'OzqM8PBhVxbNYEUt',
+  },
+  pool: true,
+  maxConnections: 5,
+  maxMessages: 100,
+});
+
 const emailSender = async (to: string, html: string, subject: string) => {
   try {
-    const transporter = nodemailer.createTransport({
-      host: 'smtp-relay.brevo.com',
-      port: 2525,
-      secure: false,
-      auth: {
-        user: '88803c001@smtp-brevo.com',
-        pass: 'OzqM8PBhVxbNYEUt',
-      },
-    });
     const mailOptions = {
       from: '<akonhasan680@gmail.com>',
       to,
@@ -1572,7 +1578,7 @@ const emailSender = async (to: string, html: string, subject: string) => {
       text: html.replace(/<[^>]+>/g, ''),
       html,
     };
-    // Send the email
+    // Reuse the singleton transporter — no SMTP handshake per send
     const info = await transporter.sendMail(mailOptions);
     return info.messageId;
   } catch (error) {

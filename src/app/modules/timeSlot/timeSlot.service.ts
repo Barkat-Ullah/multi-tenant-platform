@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import { ObjectId } from 'mongodb';
 import prisma from '../../utils/prisma';
 import ApiError from '../../errors/AppError';
 import httpStatus from 'http-status';
@@ -136,25 +137,34 @@ const createAvailabilityWithSlots = async (req: Request) => {
     where: { availabilityId: availability.id },
   });
 
-  const createdSlots = await Promise.all(
-    slots.map(slot =>
-      prisma.timeSlot.create({
-        data: {
-          availabilityId: availability.id,
-          clinicId,
-          date: slot.nextDay ? nextDayObj : slotDateObj,
-          startTime: slot.startTime,
-          endTime: slot.endTime,
-          duration: 30,
-          capacity: capacity ?? 100,
-          booked: 0,
-          isBooked: false,
-          status: SlotStatus.Active,
-        },
-        select: timeSlotSelect,
-      }),
-    ),
-  );
+  // Single insertMany command — one DB round-trip instead of N individual creates.
+  // Prisma's createMany is unsupported on MongoDB, so use a raw insert.
+  // createMany/insertMany don't return the created records — re-query them after.
+  await prisma.$runCommandRaw({
+    insert: 'time_slots',
+    documents: slots.map(slot => ({
+      availabilityId: new ObjectId(availability.id),
+      clinicId: new ObjectId(clinicId),
+      date: slot.nextDay ? nextDayObj : slotDateObj,
+      duration: 30,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      capacity: capacity ?? 100,
+      booked: 0,
+      isBooked: false,
+      status: 'Active',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })),
+  });
+
+  // Re-query the just-created slots; ordering reproduces the original
+  // chronological generation order (incl. overnight slots across dates).
+  const createdSlots = await prisma.timeSlot.findMany({
+    where: { availabilityId: availability.id },
+    orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+    select: timeSlotSelect,
+  });
 
   await CacheInvalidator.onRelatedChange('timeSlot');
 

@@ -25,10 +25,10 @@ type IncomingMessage =
       fileUrl?: string;
       fileName?: string;
     }
-  | { event: "fetchChats"; receiverId: string }
+  | { event: "fetchChats"; receiverId: string; cursor?: string; limit?: number }
   | { event: "onlineUsers" }
   | { event: "unReadMessages"; receiverId: string }
-  | { event: "messageList" }
+  | { event: "messageList"; cursor?: string; limit?: number }
   | { event: "ping" };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -396,6 +396,8 @@ export async function setupWebSocket(server: Server) {
           // ── Fetch Chat History ───────────────────────────────────────────
           case "fetchChats": {
             const { receiverId } = parsedData;
+            const limit = Math.min(Math.max(parsedData.limit ?? 50, 1), 100);
+            const cursor = parsedData.cursor;
 
             const room = await prisma.room.findFirst({
               where: {
@@ -407,27 +409,41 @@ export async function setupWebSocket(server: Server) {
             });
 
             if (!room) {
-              sendToSocket(ws, "fetchChats", []);
+              sendToSocket(ws, "fetchChats", {
+                messages: [],
+                hasMore: false,
+                nextCursor: null,
+              });
               return;
             }
 
             const [chats] = await Promise.all([
               prisma.chat.findMany({
-                where: { roomId: room.id },
-                orderBy: { createdAt: "asc" },
-                take: 200,
+                where: {
+                  roomId: room.id,
+                  ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
+                },
+                orderBy: { createdAt: "desc" },
+                take: limit + 1,
                 select: chatSelect,
               }),
               markRoomAsRead(room.id, ws.userId!),
             ]);
 
-            const formattedChats = chats.map((chat) => ({
+            const hasMore = chats.length > limit;
+            const page = (hasMore ? chats.slice(0, limit) : chats).reverse();
+
+            const formattedChats = page.map((chat) => ({
               ...chat,
               sender: formatUser(chat.sender),
               receiver: formatUser(chat.receiver),
             }));
 
-            sendToSocket(ws, "fetchChats", formattedChats);
+            sendToSocket(ws, "fetchChats", {
+              messages: formattedChats,
+              hasMore,
+              nextCursor: hasMore ? page[0].createdAt.toISOString() : null,
+            });
             break;
           }
 
@@ -477,6 +493,9 @@ export async function setupWebSocket(server: Server) {
 
           // ── Message List (conversation sidebar) ─────────────────────────
           case "messageList": {
+            const limit = Math.min(Math.max(parsedData.limit ?? 50, 1), 100);
+            const cursor = parsedData.cursor;
+
             // Step 1: fetch rooms WITHOUT a nested chat include (no per-room
             // subquery/lateral join).
             const rooms = await prisma.room.findMany({
@@ -485,12 +504,14 @@ export async function setupWebSocket(server: Server) {
                   { senderId: ws.userId! },
                   { receiverId: ws.userId! },
                 ],
+                ...(cursor ? { updatedAt: { lt: new Date(cursor) } } : {}),
               },
-              take: 100,
+              take: limit + 1,
               select: {
                 id: true,
                 senderId: true,
                 receiverId: true,
+                updatedAt: true,
                 sender: { select: userSelect },
                 receiver: { select: userSelect },
               },
@@ -498,11 +519,17 @@ export async function setupWebSocket(server: Server) {
             });
 
             if (rooms.length === 0) {
-              sendToSocket(ws, "messageList", []);
+              sendToSocket(ws, "messageList", {
+                conversations: [],
+                hasMore: false,
+                nextCursor: null,
+              });
               return;
             }
 
-            const roomIds = rooms.map((room) => room.id);
+            const hasMore = rooms.length > limit;
+            const page = hasMore ? rooms.slice(0, limit) : rooms;
+            const roomIds = page.map((room) => room.id);
 
             // Step 2: one flat query for the latest message per room, using
             // distinct + orderBy (Postgres DISTINCT ON under the hood) instead
@@ -519,7 +546,7 @@ export async function setupWebSocket(server: Server) {
               lastMessages.map((message) => [message.roomId, message]),
             );
 
-            const messageList = rooms.map((room) => {
+            const messageList = page.map((room) => {
               const isCurrentUserSender = room.senderId === ws.userId;
               const otherUser = isCurrentUserSender ? room.receiver : room.sender;
               const lastMessage = lastMessageByRoom.get(room.id) ?? null;
@@ -538,7 +565,13 @@ export async function setupWebSocket(server: Server) {
               };
             });
 
-            sendToSocket(ws, "messageList", messageList);
+            sendToSocket(ws, "messageList", {
+              conversations: messageList,
+              hasMore,
+              nextCursor: hasMore
+                ? page[page.length - 1].updatedAt.toISOString()
+                : null,
+            });
             break;
           }
 

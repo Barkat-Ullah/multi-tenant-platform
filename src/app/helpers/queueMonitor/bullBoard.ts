@@ -2,12 +2,12 @@ import { createBullBoard } from "@bull-board/api";
 import { BullMQAdapter } from "@bull-board/api/bullMQAdapter";
 import { ExpressAdapter } from "@bull-board/express";
 
-import { mailQueue, otpQueue } from "../queue";
+import { mailQueue } from "../queue";
 
 const serverAdapter = new ExpressAdapter();
 
 // All queues you want to monitor
-const queues = [new BullMQAdapter(otpQueue), new BullMQAdapter(mailQueue)];
+const queues = [new BullMQAdapter(mailQueue)];
 
 createBullBoard({ queues, serverAdapter });
 

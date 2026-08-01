@@ -250,9 +250,9 @@ export async function cacheOr<T>(
   // Background Cache Resolution: Sync fresh data with system security optimizations
   fetchPromise
     .then((fresh) => {
-      // Cache Penetration Protection: Lock missing keys for 2 minutes using negative caching
+      // Cache Penetration Protection: Lock missing keys for 30s using negative caching
       if (fresh === undefined || fresh === null) {
-        const negativeTTL = 60 * 2;
+        const negativeTTL = 30;
         redis
           .set(key, JSON.stringify({ __isNegativeCache: true }), "EX", negativeTTL)
           .catch((err) =>

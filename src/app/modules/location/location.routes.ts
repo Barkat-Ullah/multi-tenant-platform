@@ -5,6 +5,7 @@ import { locationController } from './location.controller';
 import { locationValidation } from './location.validation';
 import { fileUploader } from '../../utils/fileUploader';
 import authOptional from '../../middlewares/authOptional';
+import { cacheControl, cacheProfiles } from '../../middlewares/cacheControl';
 
 const router = express.Router();
 const fileUpload = fileUploader.upload.fields([
@@ -22,12 +23,12 @@ router.post(
   locationController.createLocation,
 );
 
-router.get('/', authOptional(), locationController.getLocationList);
+router.get('/', authOptional(), cacheControl(cacheProfiles.static), locationController.getLocationList);
 
-router.get('/council-nearest', authOptional(), locationController.councilNearestLocationServices);
+router.get('/council-nearest', authOptional(), cacheControl(cacheProfiles.static), locationController.councilNearestLocationServices);
 router.get('/my', auth(), locationController.getMyLocation);
 
-router.get('/:id', authOptional(), locationController.getLocationById);
+router.get('/:id', authOptional(), cacheControl(cacheProfiles.static), locationController.getLocationById);
 
 router.put(
   '/:id',

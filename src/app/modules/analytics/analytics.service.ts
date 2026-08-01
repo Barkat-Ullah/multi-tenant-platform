@@ -2,6 +2,7 @@ import prisma from '../../utils/prisma';
 import { UserRoleEnum, BookingStatus, PaymentStatus } from '@prisma/client';
 import { getDateRangeByPeriod, CalendarPeriod } from '../../utils/dateRange';
 import { cacheOr, CacheKeys, TTL } from '../../../lib/redis';
+import { ObjectId } from 'mongodb';
 
 // -------------------------------------------------------
 // helper — UTC today start/end
@@ -54,27 +55,32 @@ const getYearlyTrend = async () => {
   const now = new Date();
   const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
 
-  // Only fetch IDs/dates — not full records — to minimize memory usage
-  const [bookingMonths, paymentData] = await Promise.all([
-    prisma.booking.findMany({
-      where: { createdAt: { gte: yearStart } },
-      select: { createdAt: true },
+  // Aggregate by month directly in MongoDB — no need to load every
+  // booking/payment document into Node just to count per month.
+  const [bookingAgg, paymentAgg] = await Promise.all([
+    prisma.booking.aggregateRaw({
+      pipeline: [
+        { $match: { createdAt: { $gte: yearStart } } },
+        { $group: { _id: { $month: '$createdAt' }, count: { $sum: 1 } } },
+      ],
     }),
-    prisma.payment.findMany({
-      where: { status: PaymentStatus.SUCCESS, createdAt: { gte: yearStart } },
-      select: { createdAt: true, amount: true },
+    prisma.payment.aggregateRaw({
+      pipeline: [
+        { $match: { status: 'SUCCESS', createdAt: { $gte: yearStart } } },
+        { $group: { _id: { $month: '$createdAt' }, revenue: { $sum: '$amount' } } },
+      ],
     }),
   ]);
 
-  // Pre-compute monthly counts in a single pass (O(n) instead of O(n*12))
+  // Pre-compute monthly counts in a single pass (O(12) instead of O(n*12))
   const monthBookings = new Array(12).fill(0);
   const monthRevenue = new Array(12).fill(0);
 
-  for (const b of bookingMonths) {
-    monthBookings[b.createdAt.getUTCMonth()]++;
+  for (const row of bookingAgg as unknown as Array<{ _id: number; count: number }>) {
+    monthBookings[row._id - 1] += row.count;
   }
-  for (const p of paymentData) {
-    monthRevenue[p.createdAt.getUTCMonth()] += p.amount;
+  for (const row of paymentAgg as unknown as Array<{ _id: number; revenue: number }>) {
+    monthRevenue[row._id - 1] += row.revenue;
   }
 
   const monthNames = [
@@ -363,14 +369,26 @@ const getOrganizerAnalytics = async (organizerId: string) => {
       ]);
 
     const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
-    const bookingsThisYear = await prisma.booking.findMany({
-      where: { driver: { organizerId }, createdAt: { gte: yearStart } },
-      select: { createdAt: true },
+    // Aggregate by month directly in MongoDB ($lookup joins the driver's organizer)
+    const bookingAgg = await prisma.booking.aggregateRaw({
+      pipeline: [
+        { $match: { createdAt: { $gte: yearStart } } },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'driverId',
+            foreignField: '_id',
+            as: 'driver',
+          },
+        },
+        { $match: { 'driver.organizerId': { $eq: new ObjectId(organizerId) } } },
+        { $group: { _id: { $month: '$createdAt' }, count: { $sum: 1 } } },
+      ],
     });
 
     const monthBookings = new Array(12).fill(0);
-    for (const b of bookingsThisYear) {
-      monthBookings[b.createdAt.getUTCMonth()]++;
+    for (const row of bookingAgg as unknown as Array<{ _id: number; count: number }>) {
+      monthBookings[row._id - 1] += row.count;
     }
 
     const monthNames = [

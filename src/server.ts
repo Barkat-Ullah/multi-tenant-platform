@@ -4,10 +4,15 @@ import config from './config';
 import { initiateSuperAdmin } from './app/db/db';
 import { seedMethod } from './app/modules/paymethod/paymethod.route';
 import { disconnectRedis } from './lib/redis';
-// Start BullMQ email worker (processes queued emails)
-import './app/helpers/worker/emailWorker';
+import { setupWebSocket } from './app/helpers/webSocket';
+// Start BullMQ email worker ONLY in the worker container.
+// The app container sets IS_WORKER=false and the worker container sets
+// IS_WORKER=true in docker-compose, preventing duplicate workers/sends.
+// For local dev, set IS_WORKER=true in your .env to run the worker here.
+if (process.env.IS_WORKER === 'true') {
+  require('./app/helpers/worker/emailWorker');
+}
 
-import { setupWebSocket } from './app/middlewares/webSocket';
 
 const port = config.port || 5000;
 
