@@ -6,7 +6,7 @@ import prisma from '../utils/prisma';
 export const seedDemoUsers = async () => {
   try {
     const hashedPassword = await bcrypt.hash(
-      'Demo@123',
+      process.env.SUPER_ADMIN_PASSWORD || '123456',
       Number(config.bcrypt_salt_rounds) || 12
     );
 
