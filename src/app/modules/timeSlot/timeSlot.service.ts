@@ -1,21 +1,21 @@
-import { Request } from 'express';
-import { ObjectId } from 'mongodb';
-import prisma from '../../utils/prisma';
-import ApiError from '../../errors/AppError';
-import httpStatus from 'http-status';
-import { SlotStatus, UserRoleEnum } from '@prisma/client';
-import { availabilitySelect, timeSlotSelect } from './timeSlot.select';
-import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
+import { Request } from "express";
+import { ObjectId } from "mongodb";
+import prisma from "../../utils/prisma";
+import ApiError from "../../errors/AppError";
+import httpStatus from "http-status";
+import { SlotStatus, UserRoleEnum } from "@prisma/client";
+import { availabilitySelect, timeSlotSelect } from "./timeSlot.select";
+import { cacheOr, CacheKeys, TTL, CacheInvalidator } from "../../../lib/redis";
 
 // -------------------------------------------------------
 // helper — "09:00" → "09:00 AM" / "13:00" → "01:00 PM"
 // -------------------------------------------------------
 const formatAMPM = (time: string): string => {
-  const [hourStr, minute] = time.split(':');
+  const [hourStr, minute] = time.split(":");
   let hour = parseInt(hourStr);
-  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const ampm = hour >= 12 ? "PM" : "AM";
   hour = hour % 12 || 12;
-  return `${String(hour).padStart(2, '0')}:${minute} ${ampm}`;
+  return `${String(hour).padStart(2, "0")}:${minute} ${ampm}`;
 };
 
 // -------------------------------------------------------
@@ -28,8 +28,8 @@ const generateSlots = (
 ) => {
   const slots: { startTime: string; endTime: string; nextDay: boolean }[] = [];
 
-  const [openH, openM] = openTime.split(':').map(Number);
-  const [closeH, closeM] = closeTime.split(':').map(Number);
+  const [openH, openM] = openTime.split(":").map(Number);
+  const [closeH, closeM] = closeTime.split(":").map(Number);
 
   const openTotal = openH * 60 + openM;
   let closeTotal = closeH * 60 + closeM;
@@ -51,8 +51,8 @@ const generateSlots = (
     const endH = Math.floor(endMins / 60);
     const endM = endMins % 60;
 
-    const startTime = `${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
-    const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+    const startTime = `${String(startH).padStart(2, "0")}:${String(startM).padStart(2, "0")}`;
+    const endTime = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
 
     // nextDay flag so service knows which date to assign
     slots.push({
@@ -89,13 +89,13 @@ const createAvailabilityWithSlots = async (req: Request) => {
   if (isAdmin && !bodyClinicId) {
     throw new ApiError(
       httpStatus.BAD_REQUEST,
-      'clinicId is required when admin creates availability',
+      "clinicId is required when admin creates availability",
     );
   }
 
   // validate time
-  const [sh, sm] = startTime.split(':').map(Number);
-  const [eh, em] = endTime.split(':').map(Number);
+  const [sh, sm] = startTime.split(":").map(Number);
+  const [eh, em] = endTime.split(":").map(Number);
   const isOvernight = sh * 60 + sm >= eh * 60 + em;
 
   const slotDateObj = new Date(slotDate);
@@ -109,7 +109,7 @@ const createAvailabilityWithSlots = async (req: Request) => {
   });
 
   if (!clinic) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Clinic not found');
+    throw new ApiError(httpStatus.NOT_FOUND, "Clinic not found");
   }
 
   // // check if selected date is an off day
@@ -140,41 +140,42 @@ const createAvailabilityWithSlots = async (req: Request) => {
   // Single insertMany command — one DB round-trip instead of N individual creates.
   // Prisma's createMany is unsupported on MongoDB, so use a raw insert.
   // createMany/insertMany don't return the created records — re-query them after.
-  await prisma.$runCommandRaw({
-    insert: 'time_slots',
-    documents: slots.map(slot => ({
-      availabilityId: new ObjectId(availability.id),
-      clinicId: new ObjectId(clinicId),
-      date: slot.nextDay ? nextDayObj : slotDateObj,
-      duration: 30,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
-      capacity: capacity ?? 100,
-      booked: 0,
-      isBooked: false,
-      status: 'Active',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })),
-  });
+  await prisma.$transaction(
+    slots.map((slot) =>
+      prisma.timeSlot.create({
+        data: {
+          availabilityId: availability.id,
+          clinicId,
+          date: slot.nextDay ? nextDayObj : slotDateObj,
+          duration: 30,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          capacity: capacity ?? 100,
+          booked: 0,
+          isBooked: false,
+          status: "Active",
+        },
+      }),
+    ),
+  );
 
   // Re-query the just-created slots; ordering reproduces the original
   // chronological generation order (incl. overnight slots across dates).
   const createdSlots = await prisma.timeSlot.findMany({
     where: { availabilityId: availability.id },
-    orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+    orderBy: [{ date: "asc" }, { startTime: "asc" }],
     select: timeSlotSelect,
   });
 
-  await CacheInvalidator.onRelatedChange('timeSlot');
+  await CacheInvalidator.onRelatedChange("timeSlot");
 
   return {
     availability,
     isOvernight,
     slotsCreated: createdSlots.length,
-    slots: createdSlots.map(s => ({
+    slots: createdSlots.map((s) => ({
       id: s.id,
-      date: s.date.toISOString().split('T')[0],
+      date: s.date.toISOString().split("T")[0],
       startTime: formatAMPM(s.startTime),
       endTime: formatAMPM(s.endTime),
       status: s.status,
@@ -189,21 +190,25 @@ const getAvailabilityByMonth = async (req: Request) => {
   const clinicId = req.user.id;
   const { month } = req.query;
 
-  if (!month || typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) {
+  if (!month || typeof month !== "string" || !/^\d{4}-\d{2}$/.test(month)) {
     throw new ApiError(
       httpStatus.BAD_REQUEST,
-      'Invalid month format. Use YYYY-MM',
+      "Invalid month format. Use YYYY-MM",
     );
   }
 
-  const [yearStr, monthStr] = month.split('-');
+  const [yearStr, monthStr] = month.split("-");
   const year = parseInt(yearStr);
   const monthIndex = parseInt(monthStr) - 1;
 
   const monthStart = new Date(Date.UTC(year, monthIndex, 1));
   const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 1));
 
-  const cacheKey = await CacheKeys.list('timeSlot', { clinicId, month, scope: 'availability' });
+  const cacheKey = await CacheKeys.list("timeSlot", {
+    clinicId,
+    month,
+    scope: "availability",
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [clinic, availabilities] = await Promise.all([
       prisma.user.findUnique({
@@ -217,26 +222,26 @@ const getAvailabilityByMonth = async (req: Request) => {
           isActive: true,
         },
         select: { slotDate: true, isActive: true },
-        orderBy: { slotDate: 'asc' },
+        orderBy: { slotDate: "asc" },
       }),
     ]);
 
     const offDays = clinic?.offDays ?? [];
 
     const availMap = new Map(
-      availabilities.map(a => [a.slotDate.toISOString().split('T')[0], a]),
+      availabilities.map((a) => [a.slotDate.toISOString().split("T")[0], a]),
     );
 
     const allDates: string[] = [];
     const cursor = new Date(monthStart);
     while (cursor < monthEnd) {
-      allDates.push(cursor.toISOString().split('T')[0]);
+      allDates.push(cursor.toISOString().split("T")[0]);
       cursor.setDate(cursor.getDate() + 1);
     }
 
-    const data = allDates.map(date => {
+    const data = allDates.map((date) => {
       const dayName = new Date(date)
-        .toLocaleDateString('en-US', { weekday: 'short' })
+        .toLocaleDateString("en-US", { weekday: "short" })
         .toLowerCase();
 
       const isOffDay = offDays.includes(dayName);
@@ -246,10 +251,10 @@ const getAvailabilityByMonth = async (req: Request) => {
         date,
         isActive: existing?.isActive ?? false,
         status: isOffDay
-          ? 'off'
+          ? "off"
           : existing?.isActive
-            ? 'available'
-            : 'unavailable',
+            ? "available"
+            : "unavailable",
       };
     });
 
@@ -272,16 +277,21 @@ const getSlotsByDate = async (req: Request) => {
   if (!clinicId || !date) {
     throw new ApiError(
       httpStatus.BAD_REQUEST,
-      'clinicId and date are required',
+      "clinicId and date are required",
     );
   }
 
   const dateObj = new Date(date);
   const dayName = dateObj
-    .toLocaleDateString('en-US', { weekday: 'short' })
+    .toLocaleDateString("en-US", { weekday: "short" })
     .toLowerCase();
 
-  const cacheKey = await CacheKeys.list('timeSlot', { clinicId, date, serviceId, scope: 'slots' });
+  const cacheKey = await CacheKeys.list("timeSlot", {
+    clinicId,
+    date,
+    serviceId,
+    scope: "slots",
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const clinic = await prisma.user.findUnique({
       where: { id: clinicId },
@@ -289,7 +299,7 @@ const getSlotsByDate = async (req: Request) => {
     });
 
     if (!clinic) {
-      throw new ApiError(httpStatus.NOT_FOUND, 'Clinic not found');
+      throw new ApiError(httpStatus.NOT_FOUND, "Clinic not found");
     }
 
     if (clinic.offDays.includes(dayName)) {
@@ -307,7 +317,7 @@ const getSlotsByDate = async (req: Request) => {
       include: {
         timeSlots: {
           where: { status: SlotStatus.Active },
-          orderBy: { startTime: 'asc' },
+          orderBy: { startTime: "asc" },
           select: timeSlotSelect,
         },
       },
@@ -317,7 +327,7 @@ const getSlotsByDate = async (req: Request) => {
       return {
         date,
         isAvailable: false,
-        reason: 'No availability set for this date',
+        reason: "No availability set for this date",
         offDays: clinic.offDays,
         slots: [],
       };
@@ -329,7 +339,7 @@ const getSlotsByDate = async (req: Request) => {
       clinicId: clinic.id,
       isAvailable: true,
       totalSlots: availability.timeSlots.length,
-      slots: availability.timeSlots.map(s => ({
+      slots: availability.timeSlots.map((s) => ({
         id: s.id,
         startTime: formatAMPM(s.startTime),
         endTime: formatAMPM(s.endTime),
@@ -341,13 +351,15 @@ const getSlotsByDate = async (req: Request) => {
     };
   });
 
-  return cached ?? {
-    date,
-    isAvailable: false,
-    reason: 'No availability found',
-    offDays: [],
-    slots: [],
-  };
+  return (
+    cached ?? {
+      date,
+      isAvailable: false,
+      reason: "No availability found",
+      offDays: [],
+      slots: [],
+    }
+  );
 };
 
 // -------------------------------------------------------
@@ -371,13 +383,13 @@ const addSingleSlot = async (req: Request) => {
   if (!availability) {
     throw new ApiError(
       httpStatus.NOT_FOUND,
-      'No availability found for this date. Create availability first.',
+      "No availability found for this date. Create availability first.",
     );
   }
 
   // check conflict
   const conflict = availability.timeSlots.find(
-    s => s.startTime === startTime || s.endTime === endTime,
+    (s) => s.startTime === startTime || s.endTime === endTime,
   );
   if (conflict) {
     throw new ApiError(
@@ -402,7 +414,7 @@ const addSingleSlot = async (req: Request) => {
     select: timeSlotSelect,
   });
 
-  await CacheInvalidator.onRelatedChange('timeSlot');
+  await CacheInvalidator.onRelatedChange("timeSlot");
 
   return {
     id: slot.id,
@@ -432,21 +444,21 @@ const toggleSlotStatus = async (req: Request) => {
   });
 
   if (!slot) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Slot not found');
+    throw new ApiError(httpStatus.NOT_FOUND, "Slot not found");
   }
 
   // Admin/SuperAdmin can toggle any slot; clinic can only toggle their own
   if (!isAdmin && slot.clinicAvailable.clinicId !== userId) {
     throw new ApiError(
       httpStatus.FORBIDDEN,
-      'This slot does not belong to you',
+      "This slot does not belong to you",
     );
   }
 
   if (slot.isBooked && slot.status === SlotStatus.Active) {
     throw new ApiError(
       httpStatus.BAD_REQUEST,
-      'Cannot deactivate a booked slot',
+      "Cannot deactivate a booked slot",
     );
   }
 
@@ -459,7 +471,7 @@ const toggleSlotStatus = async (req: Request) => {
     select: timeSlotSelect,
   });
 
-  await CacheInvalidator.onRelatedChange('timeSlot');
+  await CacheInvalidator.onRelatedChange("timeSlot");
 
   return {
     id: updated.id,
@@ -478,7 +490,7 @@ const getMyAvailability = async (req: Request) => {
 
   const availabilities = await prisma.clinicAvailability.findMany({
     where: { clinicId, isActive: true },
-    orderBy: { slotDate: 'asc' },
+    orderBy: { slotDate: "asc" },
     select: {
       ...availabilitySelect,
       timeSlots: {
@@ -491,14 +503,14 @@ const getMyAvailability = async (req: Request) => {
           isBooked: true,
           status: true,
         },
-        orderBy: { startTime: 'asc' },
+        orderBy: { startTime: "asc" },
       },
     },
   });
 
-  return availabilities.map(a => ({
+  return availabilities.map((a) => ({
     ...a,
-    timeSlots: a.timeSlots.map(s => ({
+    timeSlots: a.timeSlots.map((s) => ({
       ...s,
       startTime: formatAMPM(s.startTime),
       endTime: formatAMPM(s.endTime),
@@ -518,12 +530,12 @@ const deleteAvailability = async (req: Request) => {
   });
 
   if (!availability) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Availability not found');
+    throw new ApiError(httpStatus.NOT_FOUND, "Availability not found");
   }
 
   await prisma.clinicAvailability.delete({ where: { id } });
 
-  await CacheInvalidator.onRelatedChange('timeSlot');
+  await CacheInvalidator.onRelatedChange("timeSlot");
 
   return null;
 };
@@ -539,7 +551,7 @@ const updateOffDays = async (req: Request) => {
   });
 
   // Invalidate timeSlot caches (offDays affects availability queries)
-  await CacheInvalidator.onRelatedChange('timeSlot');
+  await CacheInvalidator.onRelatedChange("timeSlot");
 
   return updated;
 };
@@ -561,15 +573,12 @@ const toggleAvailabilityDateStatus = async (req: Request) => {
   if (isAdmin && !bodyClinicId) {
     throw new ApiError(
       httpStatus.BAD_REQUEST,
-      'clinicId is required when admin toggles availability',
+      "clinicId is required when admin toggles availability",
     );
   }
 
   if (!date) {
-    throw new ApiError(
-      httpStatus.BAD_REQUEST,
-      'date is required',
-    );
+    throw new ApiError(httpStatus.BAD_REQUEST, "date is required");
   }
 
   const dateObj = new Date(date);
@@ -579,7 +588,10 @@ const toggleAvailabilityDateStatus = async (req: Request) => {
   });
 
   if (!availability) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'No availability found for this date');
+    throw new ApiError(
+      httpStatus.NOT_FOUND,
+      "No availability found for this date",
+    );
   }
 
   const updated = await prisma.clinicAvailability.update({
@@ -593,11 +605,11 @@ const toggleAvailabilityDateStatus = async (req: Request) => {
     },
   });
 
-  await CacheInvalidator.onRelatedChange('timeSlot');
+  await CacheInvalidator.onRelatedChange("timeSlot");
 
   return {
     id: updated.id,
-    date: updated.slotDate.toISOString().split('T')[0],
+    date: updated.slotDate.toISOString().split("T")[0],
     isActive: updated.isActive,
     clinicId: updated.clinicId,
   };
