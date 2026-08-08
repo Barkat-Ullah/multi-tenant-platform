@@ -20,6 +20,7 @@ import { BookingStatus } from '@prisma/client';
 import { stripe } from './app/utils/stripe';
 import { CacheInvalidator } from './lib/redis';
 import { isRedisHealthy } from './lib/redis';
+import config from './config';
 // import { StripeWebHook } from './app/utils/StripeUtils';
 
 const app: Application = express();
@@ -61,21 +62,13 @@ app.get('/payment/success', async (req: Request, res: Response) => {
   const bookingId = req.query.bookingId as string;
 
   if (!sessionId) {
-    res.status(400).json({ success: false, message: 'Session ID is required' });
-    return;
+    return res.redirect(
+      `${config.base_url_client}/payment/cancel?bookingId=${bookingId || ''}`,
+    );
   }
 
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-
-    if (session.payment_status !== 'paid') {
-      res.status(200).json({
-        success: false,
-        message: 'Payment not completed yet',
-        status: 'pending',
-      });
-      return;
-    }
 
     const { bookingId: metaBookingId, paymentId } = session.metadata as {
       bookingId: string;
@@ -86,14 +79,10 @@ app.get('/payment/success', async (req: Request, res: Response) => {
       where: { id: paymentId },
     });
 
-    // idempotency guard — already processed
     if (payment?.status === 'SUCCESS') {
-      res.status(200).json({
-        success: true,
-        message: 'Payment already confirmed',
-        bookingId: metaBookingId,
-      });
-      return;
+      return res.redirect(
+        `${config.base_url_client}/payment/success?bookingId=${metaBookingId}`,
+      );
     }
 
     const booking = await prisma.$transaction(async tx => {
@@ -149,25 +138,20 @@ app.get('/payment/success', async (req: Request, res: Response) => {
         'Stripe',
       ).catch(err => console.error('Stripe payment mail error:', err));
     }
-
-    res.status(200).json({
-      success: true,
-      message: 'Payment verified and booking confirmed',
-      data: { booking },
-    });
+    return res.redirect(
+      `${config.base_url_client}/payment/success?bookingId=${metaBookingId}`,
+    );
   } catch (error) {
     console.error('Stripe success handler error:', error);
-    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
 
 app.get('/payment/cancel', (req: Request, res: Response) => {
-  res.status(200).json({
-    success: false,
-    message: 'Payment was cancelled. No charge was made.',
-  });
+  const bookingId = req.query.bookingId as string;
+  return res.redirect(
+    `${config.base_url_client}/payment/cancel?bookingId=${bookingId || ''}`,
+  );
 });
-
 app.get('/health', serverHealth);
 
 // 404 handler (before global error)
