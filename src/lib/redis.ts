@@ -1,18 +1,18 @@
-import Redis, { RedisOptions } from "ioredis";
+import Redis, { RedisOptions } from 'ioredis';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Redis Client Configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const redisOptions: RedisOptions = {
-  host: process.env.REDIS_HOST || "127.0.0.1",
-  port: parseInt(process.env.REDIS_PORT || "6379"),
+  host: process.env.REDIS_HOST || '127.0.0.1',
+  port: parseInt(process.env.REDIS_PORT || '6379'),
   password: process.env.REDIS_PASSWORD || undefined,
-  db: parseInt(process.env.REDIS_DB || "0"),
+  db: parseInt(process.env.REDIS_DB || '0'),
 
   retryStrategy: (times: number) => {
     if (times > 10) {
-      console.error("Redis: max reconnection attempts reached. Giving up.");
+      console.error('Redis: max reconnection attempts reached. Giving up.');
       return null;
     }
     return Math.min(times * 200, 3000);
@@ -32,10 +32,10 @@ export const redisOptions: RedisOptions = {
 //   enableReadyCheck: false (required)
 //   do not use lazyConnect — BullMQ manages connections itself
 export const bullMQRedisOptions: RedisOptions = {
-  host: process.env.REDIS_HOST || "127.0.0.1",
-  port: parseInt(process.env.REDIS_PORT || "6379"),
+  host: process.env.REDIS_HOST || '127.0.0.1',
+  port: parseInt(process.env.REDIS_PORT || '6379'),
   password: process.env.REDIS_PASSWORD || undefined,
-  db: parseInt(process.env.REDIS_DB || "0"),
+  db: parseInt(process.env.REDIS_DB || '0'),
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
 };
@@ -49,18 +49,16 @@ export const redis = new Redis(redisOptions);
 export const createRedisClient = () => new Redis(redisOptions);
 
 // Connection lifecycle events
-redis.on("connect", () => console.info("Redis: connected"));
-redis.on("ready", () => console.info("Redis: ready to accept commands"));
-redis.on("error", (err) => console.error(`Redis error: ${err.message}`));
-redis.on("close", () =>
-  console.warn("Redis: connection closed (will retry)"),
-);
-redis.on("reconnecting", () => console.warn("Redis: reconnecting..."));
+redis.on('connect', () => console.info('Redis: connected'));
+redis.on('ready', () => console.info('Redis: ready to accept commands'));
+redis.on('error', err => console.error(`Redis error: ${err.message}`));
+redis.on('close', () => console.warn('Redis: connection closed (will retry)'));
+redis.on('reconnecting', () => console.warn('Redis: reconnecting...'));
 
 // 'end' means permanently closed — fired when retryStrategy returns null
 // 'close' is a temporary close
-redis.on("end", () =>
-  console.error("Redis: connection ended permanently — no more retries"),
+redis.on('end', () =>
+  console.error('Redis: connection ended permanently — no more retries'),
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,7 +115,9 @@ async function getVersion(verKey: string): Promise<number> {
     versionCache.set(verKey, { value, expiresAt: now + LOCAL_VERSION_TTL_MS });
     return value;
   } catch (err: any) {
-    console.error(`Redis GET failed for version key "${verKey}": ${err.message}`);
+    console.error(
+      `Redis GET failed for version key "${verKey}": ${err.message}`,
+    );
     // Redis unreachable — fall back to last known version instead of throwing,
     // so reads/writes can still proceed with a (slightly) stale namespace.
     return cached?.value ?? 0;
@@ -132,7 +132,9 @@ async function bumpVersion(verKey: string): Promise<void> {
       expiresAt: Date.now() + LOCAL_VERSION_TTL_MS,
     });
   } catch (err: any) {
-    console.error(`Redis INCR failed for version key "${verKey}": ${err.message}`);
+    console.error(
+      `Redis INCR failed for version key "${verKey}": ${err.message}`,
+    );
     // Drop local cache so the next read is forced to re-check Redis rather
     // than keep serving a version we can no longer confirm is current.
     versionCache.delete(verKey);
@@ -249,14 +251,21 @@ export async function cacheOr<T>(
 
   // Background Cache Resolution: Sync fresh data with system security optimizations
   fetchPromise
-    .then((fresh) => {
+    .then(fresh => {
       // Cache Penetration Protection: Lock missing keys for 30s using negative caching
       if (fresh === undefined || fresh === null) {
         const negativeTTL = 30;
         redis
-          .set(key, JSON.stringify({ __isNegativeCache: true }), "EX", negativeTTL)
-          .catch((err) =>
-            console.error(`Redis Negative SET failed for "${key}": ${err.message}`),
+          .set(
+            key,
+            JSON.stringify({ __isNegativeCache: true }),
+            'EX',
+            negativeTTL,
+          )
+          .catch(err =>
+            console.error(
+              `Redis Negative SET failed for "${key}": ${err.message}`,
+            ),
           );
         return;
       }
@@ -266,8 +275,8 @@ export async function cacheOr<T>(
       const finalTTL = ttl + jitter;
 
       redis
-        .set(key, JSON.stringify(fresh), "EX", finalTTL)
-        .catch((err) =>
+        .set(key, JSON.stringify(fresh), 'EX', finalTTL)
+        .catch(err =>
           console.error(`Redis SET failed for "${key}": ${err.message}`),
         );
     })
@@ -294,7 +303,7 @@ export async function invalidateKeys(...keys: string[]): Promise<void> {
     const chunk = keys.slice(i, i + CHUNK_SIZE);
     await redis
       .del(...chunk)
-      .catch((err) => console.error(`Redis DEL failed: ${err.message}`));
+      .catch(err => console.error(`Redis DEL failed: ${err.message}`));
   }
 }
 
@@ -303,7 +312,10 @@ export async function invalidateKeys(...keys: string[]): Promise<void> {
  * DEL is precise (exact key, current version) — no pattern matching needed.
  * Bumping the list version is an O(1) atomic op — old list keys just expire.
  */
-export async function invalidateRecord(model: string, id: string): Promise<void> {
+export async function invalidateRecord(
+  model: string,
+  id: string,
+): Promise<void> {
   const singleKey = await CacheKeys.single(model, id);
   await Promise.all([
     invalidateKeys(singleKey),
@@ -324,6 +336,22 @@ export async function invalidateModelLists(model: string): Promise<void> {
  */
 export async function invalidateModel(model: string): Promise<void> {
   await bumpVersion(VersionKeys.model(model));
+}
+
+/**
+ * Bump myList version for multiple users at once (e.g. clinic + driver + organizer
+ * all need their personal list cache invalidated when one record affects all three).
+ */
+export async function invalidateOwnedLists(
+  model: string,
+  userIds: (string | null | undefined)[],
+): Promise<void> {
+  const validIds = [
+    ...new Set(userIds.filter((id): id is string => Boolean(id))),
+  ];
+  await Promise.all(
+    validIds.map(id => bumpVersion(VersionKeys.myList(model, id))),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -348,11 +376,20 @@ export const CacheInvalidator = {
    * Create — invalidate only list caches (not single-record caches).
    * Avoids a full model wipe / thundering herd. Lists recover on their own TTL.
    */
-  onRecordCreate: (model: string, userId?: string) =>
-    Promise.all([
+  /**
+   * Create — invalidate list caches + any affected users' personal (myList) caches.
+   * Pass a single userId, an array of userIds, or omit if there's no owner concept.
+   */
+  onRecordCreate: (
+    model: string,
+    userIds?: string | (string | null | undefined)[],
+  ) => {
+    const ids = Array.isArray(userIds) ? userIds : userIds ? [userIds] : [];
+    return Promise.all([
       invalidateModelLists(model),
-      ...(userId ? [bumpVersion(VersionKeys.myList(model, userId))] : []),
-    ]),
+      invalidateOwnedLists(model, ids),
+    ]);
+  },
 
   /** Delete (soft or hard) — invalidate record, lists, and owner's personal lists. */
   onRecordDelete: (model: string, id: string, userId?: string) =>
@@ -438,7 +475,7 @@ export const blacklistToken = async (
   token: string,
   ttlSeconds: number,
 ): Promise<void> => {
-  await redis.set(CacheKeys.blacklist(token), "1", "EX", ttlSeconds);
+  await redis.set(CacheKeys.blacklist(token), '1', 'EX', ttlSeconds);
 };
 
 export const isTokenBlacklisted = async (token: string): Promise<boolean> => {
@@ -453,7 +490,7 @@ export const isTokenBlacklisted = async (token: string): Promise<boolean> => {
 export async function isRedisHealthy(): Promise<boolean> {
   try {
     const result = await redis.ping();
-    return result === "PONG";
+    return result === 'PONG';
   } catch {
     return false;
   }
@@ -465,19 +502,19 @@ export async function isRedisHealthy(): Promise<boolean> {
 
 export async function disconnectRedis(): Promise<void> {
   try {
-    console.info("Redis: shutting down gracefully...");
+    console.info('Redis: shutting down gracefully...');
 
     await Promise.race([
       redis.quit(),
       new Promise<never>((_, reject) =>
         setTimeout(
-          () => reject(new Error("Redis quit timed out after 5s")),
+          () => reject(new Error('Redis quit timed out after 5s')),
           5_000,
         ),
       ),
     ]);
 
-    console.info("Redis: disconnected gracefully");
+    console.info('Redis: disconnected gracefully');
   } catch (err: any) {
     console.error(
       `Redis graceful quit failed: ${err.message} — forcing disconnect`,
@@ -510,7 +547,7 @@ function stableHash(obj: Record<string, unknown>): string {
     .sort()
     .reduce<Record<string, unknown>>((acc, k) => {
       const v = obj[k];
-      if (v !== undefined && v !== null && v !== "") {
+      if (v !== undefined && v !== null && v !== '') {
         acc[k] = v;
       }
       return acc;

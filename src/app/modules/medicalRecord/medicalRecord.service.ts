@@ -200,7 +200,11 @@ const createMedicalRecord = async (req: Request) => {
   // ----------------------------------------------------------
   // Cross-model: invalidate medical record + related booking caches
   await Promise.all([
-    CacheInvalidator.onRecordCreate('medicalRecord'),
+    CacheInvalidator.onRecordCreate('medicalRecord', [
+      clinicId,
+      driverId,
+      organizerId,
+    ]),
     data.bookingId
       ? CacheInvalidator.onRelatedChangeFull('booking')
       : Promise.resolve(),
@@ -244,18 +248,22 @@ const createMedicalRecord = async (req: Request) => {
   });
 
   if (driver?.email) {
-    mailQueue.add('send-email', {
-      type: 'medical-record-driver',
-      to: driver.email,
-      html: medicalRecordUploadedDriverEmail(
-        driver.fullName,
-        clinicName,
-        medicalRecord.id,
-        recordResult,
-        expiryDateStr,
-      ),
-      subject: 'Your Medical Record Has Been Uploaded',
-    }).catch(err => console.error('Driver medical record mail queue failed:', err));
+    mailQueue
+      .add('send-email', {
+        type: 'medical-record-driver',
+        to: driver.email,
+        html: medicalRecordUploadedDriverEmail(
+          driver.fullName,
+          clinicName,
+          medicalRecord.id,
+          recordResult,
+          expiryDateStr,
+        ),
+        subject: 'Your Medical Record Has Been Uploaded',
+      })
+      .catch(err =>
+        console.error('Driver medical record mail queue failed:', err),
+      );
   }
 
   // ----------------------------------------------------------
@@ -274,21 +282,23 @@ const createMedicalRecord = async (req: Request) => {
     });
 
     if (organizer.email) {
-      mailQueue.add('send-email', {
-        type: 'medical-record-organizer',
-        to: organizer.email,
-        html: medicalRecordUploadedOrganizerEmail(
-          organizer.fullName,
-          driver?.fullName ?? 'Driver',
-          clinicName,
-          medicalRecord.id,
-          recordResult,
-          expiryDateStr,
-        ),
-        subject: 'Driver Medical Record Uploaded',
-      }).catch(err =>
-        console.error('Organizer medical record mail queue failed:', err),
-      );
+      mailQueue
+        .add('send-email', {
+          type: 'medical-record-organizer',
+          to: organizer.email,
+          html: medicalRecordUploadedOrganizerEmail(
+            organizer.fullName,
+            driver?.fullName ?? 'Driver',
+            clinicName,
+            medicalRecord.id,
+            recordResult,
+            expiryDateStr,
+          ),
+          subject: 'Driver Medical Record Uploaded',
+        })
+        .catch(err =>
+          console.error('Organizer medical record mail queue failed:', err),
+        );
     }
   }
 
@@ -322,7 +332,12 @@ const getMedicalRecordList = async (
   const whereConditions: Prisma.MedicalRecordWhereInput =
     andConditions.length > 0 ? { AND: andConditions } : {};
 
-  const cacheKey = await CacheKeys.list('medicalRecord', { page, limit, searchTerm, ...filterData });
+  const cacheKey = await CacheKeys.list('medicalRecord', {
+    page,
+    limit,
+    searchTerm,
+    ...filterData,
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [result, total] = await Promise.all([
       prisma.medicalRecord.findMany({
@@ -351,7 +366,10 @@ const getMedicalRecordById = async (req: Request) => {
 
   const cacheKey = await CacheKeys.single('medicalRecord', id);
   const result = await cacheOr(cacheKey, TTL.MEDIUM, () =>
-    prisma.medicalRecord.findUnique({ where: { id }, select: medicalRecordSelect }),
+    prisma.medicalRecord.findUnique({
+      where: { id },
+      select: medicalRecordSelect,
+    }),
   );
 
   if (!result) {
@@ -434,7 +452,12 @@ const getMyMedicalRecord = async (
     AND: andConditions,
   };
 
-  const cacheKey = await CacheKeys.myList('medicalRecord', userId, { page, limit, searchTerm, ...filterData });
+  const cacheKey = await CacheKeys.myList('medicalRecord', userId, {
+    page,
+    limit,
+    searchTerm,
+    ...filterData,
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [result, total] = await Promise.all([
       prisma.medicalRecord.findMany({
