@@ -13,7 +13,13 @@ import emailSender, {
 } from '../../utils/sendMail';
 import { mailQueue } from '../../helpers/queue';
 import { getAdminAndSuperAdminEmails } from '../booking/booking.helper';
-import { cacheOr, CacheKeys, TTL, CacheInvalidator } from '../../../lib/redis';
+import {
+  cacheOr,
+  CacheKeys,
+  TTL,
+  CacheInvalidator,
+  invalidateModelLists,
+} from '../../../lib/redis';
 
 const baseOrganizerRequestInclude: Prisma.OrganizerRequestInclude = {
   service: true,
@@ -37,7 +43,7 @@ const createOrganizerRequest = async (req: Request) => {
     include: baseOrganizerRequestInclude,
   });
 
-  await CacheInvalidator.onRecordCreate('organizerRequest');
+  await CacheInvalidator.onRecordCreate('organizerRequest', userId);
 
   // ----------------------------------------------------------
   // Fetch organizer + service + admins for notifications
@@ -58,20 +64,24 @@ const createOrganizerRequest = async (req: Request) => {
   // ----------------------------------------------------------
   for (const admin of admins) {
     // queue email via BullMQ (non-blocking)
-    mailQueue.add('send-email', {
-      type: 'organizer-request-admin',
-      to: admin.email,
-      html: newOrganizerRequestAdminEmail(
-        admin.fullName,
-        organizer?.fullName ?? 'Organizer',
-        companyName,
-        organizerRequest.id,
-        serviceName,
-        organizerRequest.totalDriver,
-        organizerRequest.location,
-      ),
-      subject: 'New Organizer Request Submitted',
-    }).catch(err => console.error('Admin organizer request mail queue failed:', err));
+    mailQueue
+      .add('send-email', {
+        type: 'organizer-request-admin',
+        to: admin.email,
+        html: newOrganizerRequestAdminEmail(
+          admin.fullName,
+          organizer?.fullName ?? 'Organizer',
+          companyName,
+          organizerRequest.id,
+          serviceName,
+          organizerRequest.totalDriver,
+          organizerRequest.location,
+        ),
+        subject: 'New Organizer Request Submitted',
+      })
+      .catch(err =>
+        console.error('Admin organizer request mail queue failed:', err),
+      );
 
     // notification (fire-and-forget)
     prisma.notification
@@ -122,7 +132,14 @@ const getOrganizerRequestList = async (
     AND: andConditions,
   };
 
-  const cacheKey = await CacheKeys.list('organizerRequest', { page, limit, searchTerm, ...filterData, role: req.user.role, userId: req.user.id });
+  const cacheKey = await CacheKeys.list('organizerRequest', {
+    page,
+    limit,
+    searchTerm,
+    ...filterData,
+    role: req.user.role,
+    userId: req.user.id,
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [
       result,
@@ -177,7 +194,20 @@ const getOrganizerRequestList = async (
     };
   });
 
-  return cached ?? { meta: { total: 0, page, limit, corporateClients: 0, activeCorporate: 0, monthlyBookings: 0, reqCorporates: 0 }, data: [] };
+  return (
+    cached ?? {
+      meta: {
+        total: 0,
+        page,
+        limit,
+        corporateClients: 0,
+        activeCorporate: 0,
+        monthlyBookings: 0,
+        reqCorporates: 0,
+      },
+      data: [],
+    }
+  );
 };
 
 const getOrganizerRequestById = async (id: string, user: any) => {
@@ -239,7 +269,12 @@ const getMyOrganizerRequest = async (
     AND: andConditions,
   };
 
-  const cacheKey = await CacheKeys.myList('organizerRequest', userId, { page, limit, searchTerm, ...filterData });
+  const cacheKey = await CacheKeys.myList('organizerRequest', userId, {
+    page,
+    limit,
+    searchTerm,
+    ...filterData,
+  });
   const cached = await cacheOr(cacheKey, TTL.SHORT, async () => {
     const [result, total] = await Promise.all([
       prisma.organizerRequest.findMany({
@@ -330,58 +365,68 @@ const assignClinicAndStatus = async (
 
     // queue email → clinic via BullMQ (non-blocking)
     if (clinic?.email) {
-      mailQueue.add('send-email', {
-        type: 'clinic-assigned',
-        to: clinic.email,
-        html: clinicAssignedEmail(
-          clinic.fullName,
-          existing.companyName,
-          id,
-          existing.service.title,
-          existing.totalDriver,
-        ),
-        subject: 'New Organizer Request Assigned to Your Clinic',
-      }).catch(err => console.error('Clinic assign mail queue failed:', err));
+      mailQueue
+        .add('send-email', {
+          type: 'clinic-assigned',
+          to: clinic.email,
+          html: clinicAssignedEmail(
+            clinic.fullName,
+            existing.companyName,
+            id,
+            existing.service.title,
+            existing.totalDriver,
+          ),
+          subject: 'New Organizer Request Assigned to Your Clinic',
+        })
+        .catch(err => console.error('Clinic assign mail queue failed:', err));
     }
 
     // queue email → organizer via BullMQ (non-blocking)
     if (existing.organizer.email) {
-      mailQueue.add('send-email', {
-        type: 'organizer-confirmed',
-        to: existing.organizer.email,
-        html: organizerRequestConfirmedEmail(
-          existing.organizer.fullName,
-          existing.companyName,
-          id,
-          clinic?.fullName ?? 'Assigned Clinic',
-          existing.service.title,
-        ),
-        subject: 'Your Request Has Been Confirmed – Add Your Drivers',
-      }).catch(err => console.error('Organizer confirm mail queue failed:', err));
+      mailQueue
+        .add('send-email', {
+          type: 'organizer-confirmed',
+          to: existing.organizer.email,
+          html: organizerRequestConfirmedEmail(
+            existing.organizer.fullName,
+            existing.companyName,
+            id,
+            clinic?.fullName ?? 'Assigned Clinic',
+            existing.service.title,
+          ),
+          subject: 'Your Request Has Been Confirmed – Add Your Drivers',
+        })
+        .catch(err =>
+          console.error('Organizer confirm mail queue failed:', err),
+        );
     }
 
     // notification → organizer (fire-and-forget)
-    prisma.notification.create({
-      data: {
-        receiverId: existing.userId,
-        title: 'Request Confirmed',
-        body: `Your request for ${existing.companyName} has been confirmed. Please add your drivers now.`,
-        type: 'OrganizerRequest',
-        referenceId: id,
-      },
-    }).catch(err => console.error('Organizer notification failed:', err));
-
-    // notification → clinic (fire-and-forget)
-    if (clinicId) {
-      prisma.notification.create({
+    prisma.notification
+      .create({
         data: {
-          receiverId: clinicId,
-          title: 'New Request Assigned',
-          body: `A new organizer request from ${existing.companyName} has been assigned to your clinic.`,
+          receiverId: existing.userId,
+          title: 'Request Confirmed',
+          body: `Your request for ${existing.companyName} has been confirmed. Please add your drivers now.`,
           type: 'OrganizerRequest',
           referenceId: id,
         },
-      }).catch(err => console.error('Clinic notification failed:', err));
+      })
+      .catch(err => console.error('Organizer notification failed:', err));
+
+    // notification → clinic (fire-and-forget)
+    if (clinicId) {
+      prisma.notification
+        .create({
+          data: {
+            receiverId: clinicId,
+            title: 'New Request Assigned',
+            body: `A new organizer request from ${existing.companyName} has been assigned to your clinic.`,
+            type: 'OrganizerRequest',
+            referenceId: id,
+          },
+        })
+        .catch(err => console.error('Clinic notification failed:', err));
     }
   }
 

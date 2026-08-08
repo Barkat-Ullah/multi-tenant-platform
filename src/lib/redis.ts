@@ -348,7 +348,11 @@ export const CacheInvalidator = {
    * Create — invalidate only list caches (not single-record caches).
    * Avoids a full model wipe / thundering herd. Lists recover on their own TTL.
    */
-  onRecordCreate: (model: string) => invalidateModelLists(model),
+  onRecordCreate: (model: string, userId?: string) =>
+    Promise.all([
+      invalidateModelLists(model),
+      ...(userId ? [bumpVersion(VersionKeys.myList(model, userId))] : []),
+    ]),
 
   /** Delete (soft or hard) — invalidate record, lists, and owner's personal lists. */
   onRecordDelete: (model: string, id: string, userId?: string) =>
@@ -358,17 +362,20 @@ export const CacheInvalidator = {
     ]),
 
   /** A related model changed and affects list views only. */
-  onRelatedChange: (dependentModel: string) => invalidateModelLists(dependentModel),
+  onRelatedChange: (dependentModel: string) =>
+    invalidateModelLists(dependentModel),
 
   /** A related model changed and affects detail pages too — full wipe. */
-  onRelatedChangeFull: (dependentModel: string) => invalidateModel(dependentModel),
+  onRelatedChangeFull: (dependentModel: string) =>
+    invalidateModel(dependentModel),
 
   /** Full wipe for multiple models. */
-  many: (...models: string[]) => Promise.all(models.map((m) => invalidateModel(m))),
+  many: (...models: string[]) =>
+    Promise.all(models.map(m => invalidateModel(m))),
 
   /** List-only wipe for multiple models. */
   manyLists: (...models: string[]) =>
-    Promise.all(models.map((m) => invalidateModelLists(m))),
+    Promise.all(models.map(m => invalidateModelLists(m))),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
