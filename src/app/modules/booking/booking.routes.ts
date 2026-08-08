@@ -18,12 +18,12 @@ router.post(
 // verify after payment redirect — called by frontend
 router.get(
   '/payment/verify-stripe',
-  auth(UserRoleEnum.USER),
+  auth(),
   bookingController.verifyStripePayment,
 );
 router.post(
   '/payment/verify-paypal',
-  auth(UserRoleEnum.USER),
+  auth(),
   bookingController.verifyPaypalPayment,
 );
 
