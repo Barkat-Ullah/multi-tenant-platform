@@ -48,6 +48,111 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
+// app.get('/payment/success', async (req: Request, res: Response) => {
+//   const sessionId = req.query.session_id as string;
+//   const bookingId = req.query.bookingId as string;
+
+//   if (!sessionId) {
+//     res.status(400).json({ success: false, message: 'Session ID is required' });
+//     return;
+//   }
+
+//   try {
+//     const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+//     if (session.payment_status !== 'paid') {
+//       res.status(200).json({
+//         success: false,
+//         message: 'Payment not completed yet',
+//         status: 'pending',
+//       });
+//       return;
+//     }
+
+//     const { bookingId: metaBookingId, paymentId } = session.metadata as {
+//       bookingId: string;
+//       paymentId: string;
+//     };
+
+//     const payment = await prisma.payment.findUnique({
+//       where: { id: paymentId },
+//     });
+
+//     // idempotency guard — already processed
+//     if (payment?.status === 'SUCCESS') {
+//       res.status(200).json({
+//         success: true,
+//         message: 'Payment already confirmed',
+//         bookingId: metaBookingId,
+//       });
+//       return;
+//     }
+
+//     const booking = await prisma.$transaction(async tx => {
+//       await tx.payment.update({
+//         where: { id: paymentId },
+//         data: {
+//           status: 'SUCCESS',
+//           stripePaymentId: session.payment_intent as string,
+//         },
+//       });
+
+//       const updated = await tx.booking.update({
+//         where: { id: metaBookingId },
+//         data: { status: BookingStatus.CONFIRMED },
+//         select: bookingSelect,
+//       });
+
+//       const fullBooking = await tx.booking.findUnique({
+//         where: { id: metaBookingId },
+//       });
+
+//       await tx.notification.create({
+//         data: {
+//           receiverId: fullBooking!.driverId,
+//           title: 'Payment Successful',
+//           body: 'Your payment was received and your booking is confirmed.',
+//           type: 'Payment',
+//           referenceId: metaBookingId,
+//         },
+//       });
+
+//       return updated;
+//     });
+
+//     // Cross-model invalidation after payment confirmation
+//     await Promise.all([
+//       CacheInvalidator.onRecordUpdate('booking', metaBookingId),
+//       CacheInvalidator.onRecordUpdate('payment', paymentId),
+//       CacheInvalidator.onRelatedChange('notification'),
+//     ]);
+
+//     // send payment success mails
+//     const confirmedBooking = await prisma.booking.findUnique({
+//       where: { id: metaBookingId },
+//       select: { driverId: true },
+//     });
+
+//     if (confirmedBooking) {
+//       sendPaymentSuccessMails(
+//         metaBookingId,
+//         confirmedBooking.driverId,
+//         session.amount_total ? session.amount_total / 100 : 0,
+//         'Stripe',
+//       ).catch(err => console.error('Stripe payment mail error:', err));
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       message: 'Payment verified and booking confirmed',
+//       data: { booking },
+//     });
+//   } catch (error) {
+//     console.error('Stripe success handler error:', error);
+//     res.status(500).json({ success: false, message: 'Internal server error' });
+//   }
+// });
+
 app.get('/payment/cancel', (req: Request, res: Response) => {
   res.status(200).json({
     success: false,
