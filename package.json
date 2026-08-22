@@ -7,12 +7,12 @@
     "schema": "./prisma"
   },
   "scripts": {
-    "start": "node ./dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only ./src/server.ts",
+    "start": "node init && node ./dist/server.js",
+    "dev": "node init && ts-node-dev --respawn --transpile-only ./src/server.ts",
     "pm": "npx prisma migrate dev ",
     "pg": "npx prisma generate",
     "generate": "ts-node src/generate-module.js",
-    "build": "tsc && npx prisma generate",
+    "build": "node init && tsc && npx prisma generate",
     "postinstall": "prisma generate",
     "lint:check": "eslint --ignore-path .eslintignore --ext .js,.ts .",
     "lint:fix": "eslint . --fix",
